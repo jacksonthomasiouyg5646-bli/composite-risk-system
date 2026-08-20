@@ -1,0 +1,13 @@
+app:
+  id: ${APP_ID:discovery-server}
+
+# Apollo connection settings are the only local bootstrap configuration.
+# Runtime settings are published in Apollo.
+apollo:
+  meta: ${APOLLO_META:http://localhost:8080}
+  required: ${APOLLO_REQUIRED:true}
+  bootstrap:
+    enabled: ${APOLLO_ENABLED:true}
+    eagerLoad:
+      enabled: true
+    namespaces: ${APOLLO_NAMESPACES:application}

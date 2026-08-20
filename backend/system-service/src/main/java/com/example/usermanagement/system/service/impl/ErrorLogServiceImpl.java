@@ -1,0 +1,19 @@
+package com.example.usermanagement.system.service.impl;
+
+import com.example.usermanagement.system.mapper.SystemCrudMapper;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.Map;
+
+@Service
+public class ErrorLogServiceImpl extends AbstractSystemCrudService {
+    private final SystemCrudMapper mapper;
+    public ErrorLogServiceImpl(SystemCrudMapper mapper) { this.mapper = mapper; }
+    @Override public Map<String, Object> get(Long id) { return mapper.getErrorLog(id); }
+    @Override public void delete(Long id) { mapper.deleteErrorLog(id); }
+    @Override protected List<Map<String, Object>> listRows(String keyword, int limit, int offset) { return mapper.listErrorLogs(keyword, limit, offset); }
+    @Override protected long countRows(String keyword) { return mapper.countErrorLogs(keyword); }
+    @Override protected void insert(Map<String, Object> body) { mapper.insertErrorLog(body); }
+    @Override protected void updateRow(Long id, Map<String, Object> body) { mapper.updateErrorLog(id, body); }
+}

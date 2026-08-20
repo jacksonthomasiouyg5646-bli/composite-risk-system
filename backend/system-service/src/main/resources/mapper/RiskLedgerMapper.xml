@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.RiskLedgerMapper">
+
+    <sql id="riskLedgerFromClause">
+        from corporate_customer c
+        left join (
+            select r1.customer_no_snapshot, r1.rating_no, r1.rating_level, r1.rating_date
+            from corporate_rating r1
+            join (
+                select customer_no_snapshot, max(id) as id
+                from corporate_rating
+                where rating_status = 'APPROVED'
+                  and deleted_flag = 0
+                group by customer_no_snapshot
+            ) r2 on r1.id = r2.id
+        ) r on r.customer_no_snapshot = c.customer_no
+        left join (
+            select l1.customer_no_snapshot, l1.limit_no, l1.total_limit_amount, l1.available_limit_amount
+            from corporate_credit_limit l1
+            join (
+                select customer_no_snapshot, max(id) as id
+                from corporate_credit_limit
+                where limit_status = 'ACTIVE'
+                  and deleted_flag = 0
+                group by customer_no_snapshot
+            ) l2 on l1.id = l2.id
+        ) l on l.customer_no_snapshot = c.customer_no
+        left join (
+            select customer_no_snapshot,
+                   count(*) as application_count,
+                   sum(apply_amount) as application_amount_total,
+                   max(id) as latest_application_id
+            from corporate_credit_application
+            where deleted_flag = 0
+            group by customer_no_snapshot
+        ) app on app.customer_no_snapshot = c.customer_no
+        left join corporate_credit_application app_latest on app_latest.id = app.latest_application_id
+        left join (
+            select customer_no_snapshot,
+                   count(*) as contract_count,
+                   sum(contract_amount) as contract_amount_total,
+                   max(id) as latest_contract_id
+            from corporate_credit_contract
+            where deleted_flag = 0
+            group by customer_no_snapshot
+        ) ct on ct.customer_no_snapshot = c.customer_no
+        left join corporate_credit_contract ct_latest on ct_latest.id = ct.latest_contract_id
+        left join (
+            select customer_no_snapshot,
+                   count(*) as drawdown_count,
+                   sum(actual_draw_amount) as actual_draw_amount_total,
+                   sum(outstanding_principal_amount) as outstanding_principal_amount_total,
+                   max(id) as latest_drawdown_id
+            from corporate_credit_drawdown
+            where deleted_flag = 0
+            group by customer_no_snapshot
+        ) dr on dr.customer_no_snapshot = c.customer_no
+        left join corporate_credit_drawdown dr_latest on dr_latest.id = dr.latest_drawdown_id
+        left join (
+            select customer_no,
+                   count(*) as collateral_count,
+                   sum(appraisal_value) as appraisal_value_total,
+                   sum(confirmed_value) as confirmed_value_total,
+                   max(id) as latest_collateral_id
+            from corporate_credit_collateral
+            where deleted_flag = 0
+            group by customer_no
+        ) co on co.customer_no = c.customer_no
+        left join corporate_credit_collateral co_latest on co_latest.id = co.latest_collateral_id
+        left join (
+            select customer_no,
+                   count(*) as contract_collateral_count,
+                   sum(secured_amount) as total_secured_amount
+            from corporate_credit_contract_collateral
+            where deleted_flag = 0
+              and relation_status = 'ACTIVE'
+            group by customer_no
+        ) rel on rel.customer_no = c.customer_no
+        left join (
+            select customer_no,
+                   count(*) as exposure_count,
+                   sum(exposure_balance) as exposure_balance_total,
+                   sum(ead_amount) as ead_amount_total,
+                   max(pd) as max_pd,
+                   max(lgd_avg) as max_lgd_avg,
+                   max(lgd_downturn) as max_lgd_downturn,
+                   sum(el_avg) as el_avg_total,
+                   max(id) as latest_exposure_id
+            from corporate_risk_exposure
+            where deleted_flag = 0
+              and exposure_status = 'ACTIVE'
+            group by customer_no
+        ) ex on ex.customer_no = c.customer_no
+        left join corporate_risk_exposure ex_latest on ex_latest.id = ex.latest_exposure_id
+        left join (
+            select customer_no,
+                   count(*) as overdue_count,
+                   sum(total_overdue_amount) as overdue_total_amount,
+                   max(overdue_days) as overdue_max_days,
+                   max(id) as latest_overdue_id
+            from corporate_credit_overdue
+            where deleted_flag = 0
+            group by customer_no
+        ) ov on ov.customer_no = c.customer_no
+        left join corporate_credit_overdue ov_latest on ov_latest.id = ov.latest_overdue_id
+        left join (
+            select customer_no,
+                   count(*) as debt_default_count,
+                   sum(default_principal_amount) as default_principal_amount_total,
+                   sum(default_exposure_amount) as default_exposure_amount_total,
+                   min(case default_level when 'A' then 1 when 'B' then 2 when 'C' then 3 else 9 end) as highest_default_rank,
+                   max(id) as latest_debt_default_id
+            from corporate_debt_default
+            where deleted_flag = 0
+              and default_status = 'ACTIVE'
+            group by customer_no
+        ) dd on dd.customer_no = c.customer_no
+        left join corporate_debt_default dd_latest on dd_latest.id = dd.latest_debt_default_id
+        left join (
+            select cd1.customer_no,
+                   cd1.customer_default_no,
+                   cd1.default_status,
+                   cd1.active_default_debt_count,
+                   cd1.total_default_debt_count,
+                   cd1.highest_default_level,
+                   cd1.latest_default_date
+            from corporate_customer_default cd1
+            join (
+                select customer_no, max(id) as id
+                from corporate_customer_default
+                where deleted_flag = 0
+                group by customer_no
+            ) cd2 on cd1.id = cd2.id
+        ) cd_latest on cd_latest.customer_no = c.customer_no
+        where c.deleted_flag = 0
+        <if test="keyword != null and keyword != ''">
+            and (
+                c.customer_no like concat('%', #{keyword}, '%')
+                or c.customer_name like concat('%', #{keyword}, '%')
+                or ifnull(r.rating_no, '') like concat('%', #{keyword}, '%')
+                or ifnull(l.limit_no, '') like concat('%', #{keyword}, '%')
+                or ifnull(app_latest.application_no, '') like concat('%', #{keyword}, '%')
+                or ifnull(ct_latest.contract_no, '') like concat('%', #{keyword}, '%')
+                or ifnull(dr_latest.drawdown_no, '') like concat('%', #{keyword}, '%')
+                or ifnull(co_latest.collateral_no, '') like concat('%', #{keyword}, '%')
+                or ifnull(ov_latest.overdue_no, '') like concat('%', #{keyword}, '%')
+                or ifnull(dd_latest.debt_default_no, '') like concat('%', #{keyword}, '%')
+                or ifnull(cd_latest.customer_default_no, '') like concat('%', #{keyword}, '%')
+            )
+        </if>
+    </sql>
+
+    <select id="listRiskLedgers" resultType="map">
+        select
+            c.id,
+            c.customer_no,
+            c.customer_name as customer_name_snapshot,
+            c.status as customer_status,
+            c.risk_level as customer_risk_level,
+            c.owner_org_name,
+            c.relationship_manager_name,
+            ifnull(r.rating_no, '') as rating_no,
+            r.rating_level,
+            r.rating_date,
+            ifnull(l.limit_no, '') as limit_no,
+            ifnull(l.total_limit_amount, 0) as total_limit_amount,
+            ifnull(l.available_limit_amount, 0) as available_limit_amount,
+            ifnull(app.application_count, 0) as application_count,
+            ifnull(app.application_amount_total, 0) as application_amount_total,
+            ifnull(app_latest.application_no, '') as latest_application_no,
+            ifnull(ct.contract_count, 0) as contract_count,
+            ifnull(ct.contract_amount_total, 0) as contract_amount_total,
+            ifnull(ct_latest.contract_no, '') as latest_contract_no,
+            ifnull(dr.drawdown_count, 0) as drawdown_count,
+            ifnull(dr.actual_draw_amount_total, 0) as actual_draw_amount_total,
+            ifnull(dr.outstanding_principal_amount_total, 0) as outstanding_principal_amount_total,
+            ifnull(dr_latest.drawdown_no, '') as latest_drawdown_no,
+            ifnull(co.collateral_count, 0) as collateral_count,
+            ifnull(co.appraisal_value_total, 0) as appraisal_value_total,
+            ifnull(co.confirmed_value_total, 0) as confirmed_value_total,
+            ifnull(co_latest.collateral_no, '') as latest_collateral_no,
+            ifnull(rel.contract_collateral_count, 0) as contract_collateral_count,
+            ifnull(rel.total_secured_amount, 0) as total_secured_amount,
+            ifnull(ex.exposure_count, 0) as exposure_count,
+            ifnull(ex.exposure_balance_total, 0) as exposure_balance_total,
+            ifnull(ex.ead_amount_total, 0) as ead_amount_total,
+            ex.max_pd,
+            ex.max_lgd_avg,
+            ex.max_lgd_downturn,
+            ifnull(ex.el_avg_total, 0) as el_avg_total,
+            ifnull(ex_latest.exposure_no, '') as latest_exposure_no,
+            ifnull(ov.overdue_count, 0) as overdue_count,
+            ifnull(ov.overdue_total_amount, 0) as overdue_total_amount,
+            ifnull(ov.overdue_max_days, 0) as overdue_max_days,
+            ifnull(ov_latest.overdue_no, '') as latest_overdue_no,
+            ifnull(dd.debt_default_count, 0) as debt_default_count,
+            ifnull(dd.default_principal_amount_total, 0) as default_principal_amount_total,
+            ifnull(dd.default_exposure_amount_total, 0) as default_exposure_amount_total,
+            case dd.highest_default_rank
+                when 1 then 'A'
+                when 2 then 'B'
+                when 3 then 'C'
+                else null
+            end as highest_default_level,
+            ifnull(dd_latest.debt_default_no, '') as latest_debt_default_no,
+            ifnull(cd_latest.customer_default_no, '') as customer_default_no,
+            cd_latest.default_status as customer_default_status,
+            ifnull(cd_latest.active_default_debt_count, 0) as customer_default_active_debt_count,
+            ifnull(cd_latest.total_default_debt_count, 0) as customer_default_total_debt_count,
+            cd_latest.highest_default_level as customer_default_level,
+            cd_latest.latest_default_date as customer_default_latest_default_date,
+            case
+                when ifnull(cd_latest.default_status, '') = 'ACTIVE' then 'HIGH'
+                when ifnull(dd.debt_default_count, 0) > 0 then 'HIGH'
+                when ifnull(ov.overdue_count, 0) > 0 or ifnull(ov.overdue_max_days, 0) > 30 then 'MEDIUM'
+                when ifnull(ex.max_pd, 0) >= 0.05 then 'MEDIUM'
+                else c.risk_level
+            end as ledger_risk_level
+        <include refid="riskLedgerFromClause"/>
+        order by
+            case
+                when ifnull(cd_latest.default_status, '') = 'ACTIVE' then 1
+                when ifnull(dd.debt_default_count, 0) > 0 then 2
+                when ifnull(ov.overdue_count, 0) > 0 then 3
+                when ifnull(ex.max_pd, 0) >= 0.05 then 4
+                else 5
+            end,
+            c.customer_no
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countRiskLedgers" resultType="long">
+        select count(*)
+        <include refid="riskLedgerFromClause"/>
+    </select>
+</mapper>

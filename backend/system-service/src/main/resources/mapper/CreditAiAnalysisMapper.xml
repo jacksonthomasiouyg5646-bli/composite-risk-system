@@ -1,0 +1,344 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.CreditAiAnalysisMapper">
+
+    <select id="findCustomerProfile" resultType="map">
+        select
+            c.id,
+            c.customer_no,
+            c.customer_name,
+            c.industry_name,
+            c.customer_type,
+            c.customer_level,
+            c.risk_level as customer_risk_level,
+            c.blacklist_flag,
+            c.status as customer_status,
+            c.owner_org_name,
+            c.relationship_manager_name,
+            ifnull(r.rating_no, '') as rating_no,
+            r.rating_level,
+            r.rating_date,
+            ifnull(l.limit_no, '') as limit_no,
+            ifnull(l.total_limit_amount, 0) as total_limit_amount,
+            ifnull(l.used_limit_amount, 0) as used_limit_amount,
+            ifnull(l.available_limit_amount, 0) as available_limit_amount,
+            ifnull(l.limit_status, '') as limit_status,
+            ifnull(app.application_count, 0) as application_count,
+            ifnull(app.application_amount_total, 0) as application_amount_total,
+            ifnull(ct.contract_count, 0) as contract_count,
+            ifnull(ct.contract_amount_total, 0) as contract_amount_total,
+            ifnull(dr.drawdown_count, 0) as drawdown_count,
+            ifnull(dr.actual_draw_amount_total, 0) as actual_draw_amount_total,
+            ifnull(dr.outstanding_principal_amount_total, 0) as outstanding_principal_amount_total,
+            ifnull(co.collateral_count, 0) as collateral_count,
+            ifnull(co.confirmed_value_total, 0) as confirmed_value_total,
+            ifnull(rel.total_secured_amount, 0) as total_secured_amount,
+            ifnull(ex.exposure_count, 0) as exposure_count,
+            ifnull(ex.ead_amount_total, 0) as ead_amount_total,
+            ifnull(ex.el_avg_total, 0) as el_avg_total,
+            ifnull(ex.max_pd, 0) as max_pd,
+            ifnull(ex.max_lgd_avg, 0) as max_lgd_avg,
+            ifnull(ex.max_lgd_downturn, 0) as max_lgd_downturn,
+            ifnull(ov.overdue_count, 0) as overdue_count,
+            ifnull(ov.max_overdue_days, 0) as max_overdue_days,
+            ifnull(ov.overdue_amount_total, 0) as overdue_amount_total,
+            ifnull(dd.debt_default_count, 0) as debt_default_count,
+            ifnull(dd.default_exposure_amount_total, 0) as default_exposure_amount_total,
+            case dd.highest_default_rank when 1 then 'A' when 2 then 'B' when 3 then 'C' else '' end as highest_default_level,
+            ifnull(cd.customer_default_no, '') as customer_default_no,
+            ifnull(cd.default_status, '') as customer_default_status,
+            ifnull(cd.total_default_debt_count, 0) as customer_default_total_debt_count
+        from corporate_customer c
+        left join corporate_rating r on r.active_customer_no = c.customer_no
+        left join corporate_credit_limit l on l.active_customer_no = c.customer_no
+        left join (
+            select customer_no_snapshot as customer_no,
+                   count(*) as application_count,
+                   sum(apply_amount) as application_amount_total
+            from corporate_credit_application
+            where deleted_flag = 0
+            group by customer_no_snapshot
+        ) app on app.customer_no = c.customer_no
+        left join (
+            select customer_no_snapshot as customer_no,
+                   count(*) as contract_count,
+                   sum(contract_amount) as contract_amount_total
+            from corporate_credit_contract
+            where deleted_flag = 0
+            group by customer_no_snapshot
+        ) ct on ct.customer_no = c.customer_no
+        left join (
+            select customer_no_snapshot as customer_no,
+                   count(*) as drawdown_count,
+                   sum(actual_draw_amount) as actual_draw_amount_total,
+                   sum(outstanding_principal_amount) as outstanding_principal_amount_total
+            from corporate_credit_drawdown
+            where deleted_flag = 0
+            group by customer_no_snapshot
+        ) dr on dr.customer_no = c.customer_no
+        left join (
+            select customer_no,
+                   count(*) as collateral_count,
+                   sum(confirmed_value) as confirmed_value_total
+            from corporate_credit_collateral
+            where deleted_flag = 0
+            group by customer_no
+        ) co on co.customer_no = c.customer_no
+        left join (
+            select customer_no,
+                   sum(secured_amount) as total_secured_amount
+            from corporate_credit_contract_collateral
+            where deleted_flag = 0
+              and relation_status = 'ACTIVE'
+            group by customer_no
+        ) rel on rel.customer_no = c.customer_no
+        left join (
+            select customer_no,
+                   count(*) as exposure_count,
+                   sum(ead_amount) as ead_amount_total,
+                   sum(el_avg) as el_avg_total,
+                   max(pd) as max_pd,
+                   max(lgd_avg) as max_lgd_avg,
+                   max(lgd_downturn) as max_lgd_downturn
+            from corporate_risk_exposure
+            where deleted_flag = 0
+              and exposure_status = 'ACTIVE'
+            group by customer_no
+        ) ex on ex.customer_no = c.customer_no
+        left join (
+            select customer_no,
+                   count(*) as overdue_count,
+                   max(overdue_days) as max_overdue_days,
+                   sum(total_overdue_amount) as overdue_amount_total
+            from corporate_credit_overdue
+            where deleted_flag = 0
+            group by customer_no
+        ) ov on ov.customer_no = c.customer_no
+        left join (
+            select customer_no,
+                   count(*) as debt_default_count,
+                   sum(default_exposure_amount) as default_exposure_amount_total,
+                   min(case default_level when 'A' then 1 when 'B' then 2 when 'C' then 3 else 9 end) as highest_default_rank
+            from corporate_debt_default
+            where deleted_flag = 0
+              and default_status = 'ACTIVE'
+            group by customer_no
+        ) dd on dd.customer_no = c.customer_no
+        left join corporate_customer_default cd on cd.active_customer_no = c.customer_no
+        where c.deleted_flag = 0
+          and (
+              c.customer_no = #{customer}
+              or c.customer_name = #{customer}
+              or c.customer_no like concat('%', #{customer}, '%')
+              or c.customer_name like concat('%', #{customer}, '%')
+          )
+        order by
+            case
+                when c.customer_no = #{customer} then 1
+                when c.customer_name = #{customer} then 2
+                else 3
+            end,
+            c.customer_no
+        limit 1
+    </select>
+
+    <select id="listRecentDefaults" resultType="map">
+        select
+            debt_default_no,
+            contract_no,
+            debt_no,
+            default_level,
+            default_date,
+            overdue_days,
+            default_exposure_amount,
+            loss_amount,
+            default_status
+        from corporate_debt_default
+        where deleted_flag = 0
+          and customer_no = #{customerNo}
+        order by default_date desc, id desc
+        limit #{limit}
+    </select>
+
+    <select id="listRecentOverdues" resultType="map">
+        select
+            overdue_no,
+            contract_no,
+            debt_no,
+            overdue_date,
+            overdue_days,
+            grace_due_date,
+            legal_holiday_flag,
+            total_overdue_amount,
+            remaining_overdue_amount,
+            repayment_status,
+            collection_status
+        from corporate_credit_overdue
+        where deleted_flag = 0
+          and customer_no = #{customerNo}
+        order by overdue_date desc, id desc
+        limit #{limit}
+    </select>
+
+    <select id="listRecentContracts" resultType="map">
+        select
+            contract_no,
+            contract_name,
+            product_type,
+            contract_amount,
+            used_draw_amount,
+            available_draw_amount,
+            sign_date,
+            effective_date,
+            expiry_date,
+            contract_status
+        from corporate_credit_contract
+        where deleted_flag = 0
+          and customer_no_snapshot = #{customerNo}
+        order by effective_date desc, id desc
+        limit #{limit}
+    </select>
+
+    <select id="listCollateralSummary" resultType="map">
+        select
+            co.collateral_no,
+            co.collateral_name,
+            co.collateral_type,
+            co.confirmed_value,
+            co.available_secured_amount,
+            co.collateral_status,
+            ifnull(rel.contract_count, 0) as related_contract_count,
+            ifnull(rel.secured_amount_total, 0) as secured_amount_total
+        from corporate_credit_collateral co
+        left join (
+            select collateral_no,
+                   count(*) as contract_count,
+                   sum(secured_amount) as secured_amount_total
+            from corporate_credit_contract_collateral
+            where deleted_flag = 0
+              and relation_status = 'ACTIVE'
+            group by collateral_no
+        ) rel on rel.collateral_no = co.collateral_no
+        where co.deleted_flag = 0
+          and co.customer_no = #{customerNo}
+        order by co.confirmed_value desc, co.id desc
+        limit #{limit}
+    </select>
+
+    <select id="listCustomerTimeline" resultType="map">
+        select event_date, event_type, event_title, event_detail, risk_marker
+        from (
+            select
+                date(submitted_at) as event_date,
+                '业务申请' as event_type,
+                application_no as event_title,
+                concat(product_type, '，申请金额 ', format(apply_amount, 2), '，状态 ', application_status) as event_detail,
+                '业务申请' as risk_marker
+            from corporate_credit_application
+            where deleted_flag = 0
+              and customer_no_snapshot = #{customerNo}
+              and submitted_at is not null
+            union all
+            select
+                effective_date as event_date,
+                '合同生效' as event_type,
+                contract_no as event_title,
+                concat(product_type, '，合同金额 ', format(contract_amount, 2), '，状态 ', contract_status) as event_detail,
+                '合同' as risk_marker
+            from corporate_credit_contract
+            where deleted_flag = 0
+              and customer_no_snapshot = #{customerNo}
+            union all
+            select
+                drawdown_date as event_date,
+                '债项支用' as event_type,
+                drawdown_no as event_title,
+                concat('债项 ', ifnull(debt_no, '-'), '，支用金额 ', format(actual_draw_amount, 2), '，未结本金 ', format(outstanding_principal_amount, 2)) as event_detail,
+                '债项' as risk_marker
+            from corporate_credit_drawdown
+            where deleted_flag = 0
+              and customer_no_snapshot = #{customerNo}
+            union all
+            select
+                overdue_date as event_date,
+                '逾期预警' as event_type,
+                overdue_no as event_title,
+                concat('债项 ', debt_no, '，逾期 ', overdue_days, ' 天，逾期金额 ', format(total_overdue_amount, 2)) as event_detail,
+                '逾期' as risk_marker
+            from corporate_credit_overdue
+            where deleted_flag = 0
+              and customer_no = #{customerNo}
+            union all
+            select
+                default_date as event_date,
+                '债项违约' as event_type,
+                debt_default_no as event_title,
+                concat('债项 ', debt_no, '，违约等级 ', default_level, '，违约敞口 ', format(default_exposure_amount, 2)) as event_detail,
+                concat('违约 ', default_level) as risk_marker
+            from corporate_debt_default
+            where deleted_flag = 0
+              and customer_no = #{customerNo}
+        ) customer_events
+        where event_date is not null
+        order by event_date desc, event_type
+        limit #{limit}
+    </select>
+    <select id="listCustomerBusinessTimeline" resultType="map">
+        select event_date, event_type, event_title, event_detail, risk_marker
+        from (
+            select
+                date(submitted_at) as event_date,
+                10 as event_sequence,
+                '业务申请' as event_type,
+                application_no as event_title,
+                concat(product_type, '，申请金额 ', format(apply_amount, 2), '，状态 ', application_status) as event_detail,
+                '业务申请' as risk_marker
+            from corporate_credit_application
+            where deleted_flag = 0 and customer_no_snapshot = #{customerNo} and submitted_at is not null
+            union all
+            select
+                coalesce(effective_date, sign_date) as event_date,
+                20 as event_sequence,
+                '合同生效' as event_type,
+                contract_no as event_title,
+                concat(product_type, '，合同金额 ', format(contract_amount, 2), '，状态 ', contract_status) as event_detail,
+                '合同' as risk_marker
+            from corporate_credit_contract
+            where deleted_flag = 0 and customer_no_snapshot = #{customerNo}
+            union all
+            select
+                drawdown_date as event_date,
+                30 as event_sequence,
+                '债项支用' as event_type,
+                drawdown_no as event_title,
+                concat('债项 ', ifnull(debt_no, '-'), '，支用金额 ', format(actual_draw_amount, 2), '，未结本金 ', format(outstanding_principal_amount, 2)) as event_detail,
+                '债项' as risk_marker
+            from corporate_credit_drawdown
+            where deleted_flag = 0 and customer_no_snapshot = #{customerNo}
+            union all
+            select
+                overdue_date as event_date,
+                40 as event_sequence,
+                '债项逾期' as event_type,
+                overdue_no as event_title,
+                concat('债项 ', debt_no, '，逾期 ', overdue_days, ' 天，逾期金额 ', format(total_overdue_amount, 2)) as event_detail,
+                '逾期' as risk_marker
+            from corporate_credit_overdue
+            where deleted_flag = 0 and customer_no = #{customerNo}
+            union all
+            select
+                default_date as event_date,
+                50 as event_sequence,
+                '债项违约' as event_type,
+                debt_default_no as event_title,
+                concat('债项 ', debt_no, '，违约等级 ', default_level, '，违约敞口 ', format(default_exposure_amount, 2)) as event_detail,
+                concat('违约 ', default_level) as risk_marker
+            from corporate_debt_default
+            where deleted_flag = 0 and customer_no = #{customerNo}
+        ) customer_events
+        where event_date is not null
+        order by event_date, event_sequence, event_title
+        limit #{limit}
+    </select>
+</mapper>

@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.CompositeRiskDashboardMapper">
+
+    <sql id="compositeRiskBase">
+        select scored.*,
+               case
+                   when scored.risk_score >= 85 then '极高风险'
+                   when scored.risk_score >= 65 then '高风险'
+                   when scored.risk_score >= 45 then '中风险'
+                   else '低风险'
+               end as risk_level,
+               case
+                   when scored.debt_default_count > 0 then '债项违约'
+                   when scored.max_overdue_days > 90 then '严重逾期'
+                   when scored.max_overdue_days > 30 then '逾期预警'
+                   when scored.rating_numeric >= 21 then '评级触发'
+                   when scored.max_pd >= 0.100000 then 'PD 高风险'
+                   when scored.utilization_rate >= 0.9000 then '额度高占用'
+                   when scored.coverage_rate is not null and scored.coverage_rate &lt; 0.5000 then '押品覆盖不足'
+                   when scored.blacklist_flag = 1 then '名单风险'
+                   else '常规监测'
+               end as alert_type,
+               case
+                   when scored.risk_score >= 85 then 'P1'
+                   when scored.risk_score >= 65 then 'P2'
+                   when scored.risk_score >= 45 then 'P3'
+                   else 'P4'
+               end as priority
+        from (
+            select base.*,
+                   case
+                       when base.blacklist_flag = 1 then 98
+                       when base.debt_default_count > 0 then 95
+                       when base.max_overdue_days > 90 then 90
+                       else least(88,
+                           10
+                           + case
+                               when base.max_overdue_days > 60 then 35
+                               when base.max_overdue_days > 30 then 24
+                               when base.overdue_count > 0 then 10
+                               else 0
+                             end
+                           + case
+                               when base.max_pd >= 0.100000 then 25
+                               when base.max_pd >= 0.050000 then 16
+                               when base.max_pd >= 0.020000 then 8
+                               else 0
+                             end
+                           + case
+                               when base.rating_numeric >= 21 then 25
+                               when base.rating_numeric >= 18 then 18
+                               when base.rating_numeric >= 15 then 10
+                               else 0
+                             end
+                           + case
+                               when base.utilization_rate >= 0.9000 then 12
+                               when base.utilization_rate >= 0.7500 then 6
+                               else 0
+                             end
+                           + case
+                               when base.coverage_rate is not null and base.coverage_rate &lt; 0.5000 then 15
+                               when base.coverage_rate is not null and base.coverage_rate &lt; 1.0000 then 6
+                               else 0
+                             end
+                       )
+                   end as risk_score,
+                   concat_ws('；',
+                       case when base.blacklist_flag = 1 then '黑名单标记' end,
+                       case when base.debt_default_count > 0 then concat('债项违约 ', base.debt_default_count, ' 笔') end,
+                       case when base.max_overdue_days > 0 then concat('最大逾期 ', base.max_overdue_days, ' 天') end,
+                       case when base.max_pd >= 0.050000 then concat('PD ', round(base.max_pd * 100, 2), '%') end,
+                       case when base.rating_numeric >= 18 then concat('评级 ', base.rating_level) end,
+                       case when base.utilization_rate >= 0.7500 then concat('额度占用 ', round(base.utilization_rate * 100, 2), '%') end,
+                       case when base.coverage_rate is not null and base.coverage_rate &lt; 1.0000 then concat('押品覆盖 ', round(base.coverage_rate * 100, 2), '%') end
+                   ) as risk_signals
+            from (
+                select
+                    c.customer_no,
+                    c.customer_name,
+                    ifnull(c.industry_name, '未分类') as industry_name,
+                    ifnull(c.owner_org_name, '') as owner_org_name,
+                    ifnull(c.relationship_manager_name, '') as relationship_manager_name,
+                    c.blacklist_flag,
+                    ifnull(r.rating_level, '') as rating_level,
+                    cast(nullif(regexp_replace(ifnull(r.rating_level, ''), '[^0-9]', ''), '') as unsigned) as rating_numeric,
+                    ifnull(l.total_limit_amount, 0) as total_limit_amount,
+                    ifnull(l.used_limit_amount, 0) as used_limit_amount,
+                    ifnull(dr.outstanding_principal_amount_total, 0) as outstanding_principal_amount_total,
+                    ifnull(rel.total_secured_amount, 0) as total_secured_amount,
+                    case
+                        when ifnull(l.total_limit_amount, 0) > 0
+                            then round(ifnull(l.used_limit_amount, 0) / l.total_limit_amount, 4)
+                        else 0
+                    end as utilization_rate,
+                    case
+                        when ifnull(dr.outstanding_principal_amount_total, 0) > 0
+                            then round(ifnull(rel.total_secured_amount, 0) / dr.outstanding_principal_amount_total, 4)
+                        else null
+                    end as coverage_rate,
+                    ifnull(ex.ead_amount_total, 0) as ead_amount_total,
+                    ifnull(ex.el_avg_total, 0) as el_avg_total,
+                    ifnull(ex.max_pd, 0) as max_pd,
+                    ifnull(ov.overdue_count, 0) as overdue_count,
+                    ifnull(ov.max_overdue_days, 0) as max_overdue_days,
+                    ifnull(ov.overdue_amount_total, 0) as overdue_amount_total,
+                    ifnull(dd.debt_default_count, 0) as debt_default_count,
+                    ifnull(dd.default_exposure_amount_total, 0) as default_exposure_amount_total,
+                    case dd.highest_default_rank when 1 then 'A' when 2 then 'B' when 3 then 'C' else '' end as highest_default_level
+                from corporate_customer c
+                left join corporate_rating r on r.active_customer_no = c.customer_no
+                left join corporate_credit_limit l on l.active_customer_no = c.customer_no
+                left join (
+                    select customer_no_snapshot as customer_no,
+                           sum(outstanding_principal_amount) as outstanding_principal_amount_total
+                    from corporate_credit_drawdown
+                    where deleted_flag = 0
+                    group by customer_no_snapshot
+                ) dr on dr.customer_no = c.customer_no
+                left join (
+                    select customer_no,
+                           sum(secured_amount) as total_secured_amount
+                    from corporate_credit_contract_collateral
+                    where deleted_flag = 0 and relation_status = 'ACTIVE'
+                    group by customer_no
+                ) rel on rel.customer_no = c.customer_no
+                left join (
+                    select customer_no,
+                           sum(ead_amount) as ead_amount_total,
+                           sum(el_avg) as el_avg_total,
+                           max(pd) as max_pd
+                    from corporate_risk_exposure
+                    where deleted_flag = 0 and exposure_status = 'ACTIVE'
+                    group by customer_no
+                ) ex on ex.customer_no = c.customer_no
+                left join (
+                    select customer_no,
+                           count(*) as overdue_count,
+                           max(overdue_days) as max_overdue_days,
+                           sum(total_overdue_amount) as overdue_amount_total
+                    from corporate_credit_overdue
+                    where deleted_flag = 0
+                    group by customer_no
+                ) ov on ov.customer_no = c.customer_no
+                left join (
+                    select customer_no,
+                           count(*) as debt_default_count,
+                           sum(default_exposure_amount) as default_exposure_amount_total,
+                           min(case default_level when 'A' then 1 when 'B' then 2 when 'C' then 3 else 9 end) as highest_default_rank
+                    from corporate_debt_default
+                    where deleted_flag = 0 and default_status = 'ACTIVE'
+                    group by customer_no
+                ) dd on dd.customer_no = c.customer_no
+                where c.deleted_flag = 0
+            ) base
+        ) scored
+    </sql>
+
+    <select id="getSummary" resultType="map">
+        select
+            count(*) as customer_total,
+            sum(risk_score >= 85) as extreme_risk_count,
+            sum(risk_score >= 65 and risk_score &lt; 85) as high_risk_count,
+            sum(risk_score >= 45) as warning_customer_count,
+            ifnull(sum(case when risk_score >= 45 then ead_amount_total else 0 end), 0) as warning_ead_amount,
+            (select count(*) from risk_treatment_plan where status not in ('已完成', '已关闭')) as open_treatment_count
+        from (
+            <include refid="compositeRiskBase"/>
+        ) risk_base
+    </select>
+
+    <select id="listRiskFeatures" resultType="map">
+        select *
+        from (
+            <include refid="compositeRiskBase"/>
+        ) risk_base
+    </select>
+
+    <select id="findRiskFeatureByCustomerNo" resultType="map">
+        select *
+        from (
+            <include refid="compositeRiskBase"/>
+        ) risk_base
+        where customer_no = #{customerNo}
+    </select>
+
+    <select id="countOpenTreatmentPlans" resultType="long">
+        select count(*) from risk_treatment_plan where status not in ('已完成', '已关闭')
+    </select>
+
+    <select id="listAlerts" resultType="map">
+        select
+            customer_no,
+            customer_name,
+            industry_name,
+            owner_org_name,
+            relationship_manager_name,
+            rating_level,
+            risk_score,
+            risk_level,
+            priority,
+            alert_type,
+            risk_signals,
+            overdue_count,
+            max_overdue_days,
+            debt_default_count,
+            highest_default_level,
+            max_pd,
+            utilization_rate,
+            coverage_rate,
+            ead_amount_total,
+            outstanding_principal_amount_total,
+            default_exposure_amount_total
+        from (
+            <include refid="compositeRiskBase"/>
+        ) risk_base
+        where risk_score >= 45
+        order by risk_score desc, max_overdue_days desc, ead_amount_total desc, customer_no
+        limit #{limit}
+    </select>
+
+    <select id="listWarningTrend" resultType="map">
+        select *
+        from (
+            select
+                stat_date,
+                sum(overdue_count) as overdue_count,
+                sum(debt_default_count) as debt_default_count
+            from (
+                select overdue_date as stat_date, count(*) as overdue_count, 0 as debt_default_count
+                from corporate_credit_overdue
+                where deleted_flag = 0 and overdue_date is not null
+                group by overdue_date
+                union all
+                select default_date as stat_date, 0 as overdue_count, count(*) as debt_default_count
+                from corporate_debt_default
+                where deleted_flag = 0 and default_date is not null
+                group by default_date
+            ) daily_events
+            group by stat_date
+            order by stat_date desc
+            limit 14
+        ) recent_days
+        order by stat_date
+    </select>
+
+    <select id="listIndustryDistribution" resultType="map">
+        select
+            industry_name,
+            count(*) as customer_count,
+            sum(risk_score >= 65) as high_risk_count,
+            ifnull(sum(case when risk_score >= 65 then ead_amount_total else 0 end), 0) as high_risk_ead_amount
+        from (
+            <include refid="compositeRiskBase"/>
+        ) risk_base
+        group by industry_name
+        order by high_risk_count desc, high_risk_ead_amount desc, customer_count desc
+        limit #{limit}
+    </select>
+
+    <select id="findAlertByCustomerNo" resultType="map">
+        select *
+        from (
+            <include refid="compositeRiskBase"/>
+        ) risk_base
+        where customer_no = #{customerNo}
+    </select>
+
+    <select id="findRiskRegisterByCode" resultType="map">
+        select id, risk_code, risk_name, `level`, status
+        from risk_register
+        where risk_code = #{riskCode}
+        limit 1
+    </select>
+
+    <select id="findTreatmentPlanByRiskCode" resultType="map">
+        select id, plan_code, risk_code, action, owner, due_date, progress, status, created_at, updated_at
+        from risk_treatment_plan
+        where risk_code = #{riskCode}
+        order by id desc
+        limit 1
+    </select>
+
+    <insert id="insertCompositeRiskRegister" parameterType="map">
+        insert into risk_register
+            (risk_code, risk_name, category, `level`, owner_department, responsible_person, status, identified_at, due_date, description)
+        values
+            (#{body.risk_code}, #{body.risk_name}, #{body.category}, #{body.level}, #{body.owner_department}, #{body.responsible_person}, #{body.status}, #{body.identified_at}, #{body.due_date}, #{body.description})
+    </insert>
+
+    <insert id="insertCompositeTreatmentPlan" parameterType="map">
+        insert into risk_treatment_plan
+            (plan_code, risk_code, action, owner, due_date, progress, status)
+        values
+            (#{body.plan_code}, #{body.risk_code}, #{body.action}, #{body.owner}, #{body.due_date}, #{body.progress}, #{body.status})
+    </insert>
+</mapper>

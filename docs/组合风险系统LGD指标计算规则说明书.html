@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>组合风险系统LGD指标计算规则说明书</title>
+<style>
+@page { size: A4; margin: 18mm 16mm 18mm 18mm; }
+body { font-family: "Microsoft YaHei", "SimSun", sans-serif; color:#17263a; font-size:10.5pt; line-height:1.65; margin:0; }
+h1 { font-size:25pt; color:#12395b; margin:0 0 12px; }
+h2 { font-size:17pt; color:#164f78; border-bottom:2px solid #2a79a8; padding-bottom:6px; margin-top:24px; page-break-after:avoid; }
+h3 { font-size:13pt; color:#1f5f86; margin:18px 0 6px; page-break-after:avoid; }
+p { margin:6px 0; }
+.cover { height:245mm; display:flex; flex-direction:column; justify-content:center; background:#f4f8fb; border-left:12px solid #2777a8; padding:0 28px; box-sizing:border-box; page-break-after:always; }
+.cover .sub { font-size:14pt; color:#52708a; margin-top:8px; }
+.cover .meta { margin-top:45px; color:#53677a; }
+.notice { border-left:4px solid #e89429; background:#fff7e8; padding:10px 14px; margin:12px 0; }
+.key { border-left:4px solid #2277a5; background:#eef7fc; padding:10px 14px; margin:12px 0; }
+.warn { border-left:4px solid #cf4a3c; background:#fff1ef; padding:10px 14px; margin:12px 0; }
+table { border-collapse:collapse; width:100%; margin:10px 0 16px; font-size:9.2pt; page-break-inside:auto; }
+tr { page-break-inside:avoid; }
+th { background:#1c5d85; color:white; font-weight:600; padding:7px 6px; border:1px solid #b9cbd8; text-align:left; }
+td { padding:7px 6px; border:1px solid #c9d6df; vertical-align:top; }
+tr:nth-child(even) td { background:#f7fafc; }
+.formula { font-family:Consolas, monospace; background:#f2f5f7; border:1px solid #d6e0e6; padding:8px 10px; margin:6px 0; color:#183c56; }
+.small { font-size:8.8pt; color:#617386; }
+.shot { width:100%; border:1px solid #b9cbd8; margin:10px 0; }
+.pagebreak { page-break-before:always; }
+ol, ul { margin:6px 0 8px 22px; }
+.toc td:first-child { width:13%; text-align:center; font-weight:700; color:#1c5d85; }
+.sig { width:48%; margin-top:28px; }
+</style>
+</head>
+<body>
+<section class="cover">
+  <div class="small">组合风险系统 / 风险计量与管理</div>
+  <h1>LGD 指标计算规则说明书</h1>
+  <div class="sub">页面指标来源、计算公式、阈值规则、验算过程与口径说明</div>
+  <div class="meta">
+    <p><b>适用页面：</b>LGD 风险管理中心</p>
+    <p><b>核验数据日期：</b>2026-07-21</p>
+    <p><b>文档版本：</b>V1.0</p>
+    <p><b>编制日期：</b>2026-07-24</p>
+  </div>
+</section>
+
+<h2>1. 文档目的与适用范围</h2>
+<p>本文档解释组合风险系统“LGD 风险管理中心”页面中各项数据值的来源、筛选范围、计算公式和展示规则，供业务、风险、数据、审计和验收人员共同使用。文档以当前系统代码和本地数据库实际数据为准。</p>
+<div class="key"><b>核心结论：</b>页面总览中的 LGD、回收率采用 EAD 加权；预期损失采用数据库已落库的 EL 字段汇总。当前样本的 EL 字段按“风险敞口余额 × PD × LGD”计算，而不是按 EAD 计算。</div>
+
+<h3>1.1 页面对应截图</h3>
+<img class="shot" src="D:/software/workspace/user-management-distributed/docs/images/operation-manual/06-lgd-overview.png" alt="LGD风险管理中心">
+
+<h3>1.2 数据纳入范围</h3>
+<p>所有总览、产品结构及行业结构指标，只纳入满足以下条件的风险敞口记录：</p>
+<div class="formula">deleted_flag = 0 AND exposure_status = 'ACTIVE'</div>
+<p>即：未逻辑删除、且敞口状态为有效。客户数按有效敞口中的客户编号去重；页面“数据日期”取有效记录中的最大数据日期。</p>
+
+<h2>2. 基础字段与业务含义</h2>
+<table>
+<tr><th>字段</th><th>业务含义</th><th>单位/范围</th><th>主要用途</th></tr>
+<tr><td>exposure_balance</td><td>风险敞口余额/当前风险余额</td><td>人民币元</td><td>当前样本 EL 的计算本金口径</td></tr>
+<tr><td>ead_amount</td><td>违约风险暴露 EAD</td><td>人民币元</td><td>LGD、回收率及组合结构的加权权重</td></tr>
+<tr><td>pd</td><td>违约概率</td><td>0～1</td><td>预期损失计算</td></tr>
+<tr><td>lgd_avg</td><td>平均情景违约损失率</td><td>0～1</td><td>平均 LGD、平均 EL</td></tr>
+<tr><td>lgd_downturn</td><td>经济衰退情景违约损失率</td><td>0～1</td><td>衰退 LGD、衰退 EL、高 LGD 识别</td></tr>
+<tr><td>product_recovery_rate</td><td>产品回收率</td><td>0～1</td><td>加权回收率、低回收识别</td></tr>
+<tr><td>el_avg</td><td>平均情景预期损失</td><td>人民币元</td><td>组合平均 EL 汇总</td></tr>
+<tr><td>el_downturn</td><td>衰退情景预期损失</td><td>人民币元</td><td>组合衰退 EL 汇总</td></tr>
+<tr><td>default_flag</td><td>违约标志</td><td>0/1</td><td>违约敞口笔数</td></tr>
+</table>
+
+<h2>3. 顶部总览指标计算规则</h2>
+<table>
+<tr><th>页面指标</th><th>当前计算规则</th><th>截图结果</th></tr>
+<tr><td>风险敞口 EAD</td><td>Σ EAD；同时统计有效敞口记录数和客户编号去重数</td><td>¥105,102,270.00；400 笔 / 100 户</td></tr>
+<tr><td>平均 LGD</td><td>Σ(EAD × 平均LGD) ÷ ΣEAD</td><td>36.28%</td></tr>
+<tr><td>衰退 LGD</td><td>Σ(EAD × 衰退LGD) ÷ ΣEAD</td><td>46.60%</td></tr>
+<tr><td>较平均值差异</td><td>加权衰退LGD－加权平均LGD；为百分点差，不是相对增幅</td><td>+10.32 个百分点</td></tr>
+<tr><td>衰退预期损失</td><td>Σ 已落库 el_downturn</td><td>¥2,874,382.08</td></tr>
+<tr><td>平均预期损失</td><td>Σ 已落库 el_avg</td><td>¥2,248,403.10</td></tr>
+<tr><td>加权产品回收率</td><td>Σ(EAD × 产品回收率) ÷ ΣEAD</td><td>63.72%</td></tr>
+<tr><td>低回收率笔数</td><td>产品回收率 &lt; 40% 的有效敞口笔数</td><td>0 笔</td></tr>
+<tr><td>高 LGD 敞口</td><td>Σ 满足衰退LGD ≥ 60%的 EAD</td><td>¥6,710,634.00</td></tr>
+<tr><td>高 LGD 笔数</td><td>衰退LGD ≥ 60%的有效敞口笔数</td><td>30 笔</td></tr>
+</table>
+
+<h3>3.1 EAD 总额、笔数和户数</h3>
+<div class="formula">组合EAD = Σ ead_amount = 105,102,270.00</div>
+<div class="formula">敞口笔数 = COUNT(*) = 400</div>
+<div class="formula">客户户数 = COUNT(DISTINCT customer_no) = 100</div>
+<p>“笔”按风险敞口记录计数，不等同于合同数或客户数；一个客户可对应多笔合同、债项和支用，因此可产生多笔敞口。</p>
+
+<h3>3.2 EAD 加权平均 LGD</h3>
+<div class="formula">加权平均LGD = Σ(EADᵢ × LGD平均ᵢ) ÷ ΣEADᵢ</div>
+<p>数据库精确值为 0.362770，页面转换为百分比并保留两位小数，显示 36.28%。采用 EAD 加权，是为了让大额敞口对组合 LGD 的贡献高于小额敞口。</p>
+
+<h3>3.3 EAD 加权衰退 LGD</h3>
+<div class="formula">加权衰退LGD = Σ(EADᵢ × LGD衰退ᵢ) ÷ ΣEADᵢ</div>
+<p>数据库精确值为 0.465962，页面显示 46.60%。</p>
+<div class="formula">衰退差异 = 46.5962% - 36.2770% = 10.3192个百分点 ≈ +10.32%</div>
+<div class="notice">页面当前显示“+10.32%”，业务解释应为“增加 10.32 个百分点”。若计算相对增幅，则为 (46.5962%－36.2770%)÷36.2770% ≈ 28.45%，两者不可混用。</div>
+
+<h3>3.4 加权产品回收率</h3>
+<div class="formula">加权回收率 = Σ(EADᵢ × 回收率ᵢ) ÷ ΣEADᵢ = 63.7230% ≈ 63.72%</div>
+<p>回收率与 LGD 在简单口径下通常近似满足“回收率 = 1－LGD”，本系统样本中产品平均口径保持该关系；但在存在处置成本、时间价值、担保及模型调整时，不应强制认为二者恒等。</p>
+
+<h3>3.5 高 LGD 和低回收阈值</h3>
+<div class="formula">高LGD：lgd_downturn ≥ 0.600000</div>
+<div class="formula">低回收：product_recovery_rate &lt; 0.400000</div>
+<p>截图中 30 笔高 LGD 记录的 EAD 合计为 6,710,634.00 元。当前高 LGD 样本的产品回收率为 45%，因此未落入“低回收率 &lt;40%”范围，低回收笔数为 0。</p>
+
+<h2>4. 预期损失 EL 的计算与口径</h2>
+<h3>4.1 标准业务公式</h3>
+<div class="formula">EL = 风险暴露口径 × PD × LGD</div>
+<p>在标准 EAD 口径下，通常表示为：</p>
+<div class="formula">EL平均 = EAD × PD × LGD平均<br>EL衰退 = EAD × PD × LGD衰退</div>
+
+<h3>4.2 当前系统实际落库口径</h3>
+<p>经对 400 笔有效数据逐笔核验，当前数据库 EL 字段实际按风险敞口余额计算：</p>
+<div class="formula">el_avg = ROUND(exposure_balance × pd × lgd_avg, 2)</div>
+<div class="formula">el_downturn = ROUND(exposure_balance × pd × lgd_downturn, 2)</div>
+<p>逐笔最大误差为 0.005 元，属于金额保留两位小数时的边界舍入差异。页面不再以 EAD、PD、LGD 动态重算 EL，而是直接对已落库 EL 求和：</p>
+<div class="formula">组合平均EL = Σ el_avg = 2,248,403.10</div>
+<div class="formula">组合衰退EL = Σ el_downturn = 2,874,382.08</div>
+
+<h3>4.3 单笔数据验算示例</h3>
+<table>
+<tr><th>项目</th><th>样例值</th><th>验算</th></tr>
+<tr><td>风险敞口编号</td><td>EXPO2026072100620101</td><td>有效、违约样本</td></tr>
+<tr><td>风险敞口余额</td><td>216,152.00</td><td>EL 本金口径</td></tr>
+<tr><td>EAD</td><td>226,959.60</td><td>LGD 加权权重</td></tr>
+<tr><td>PD</td><td>65.00%</td><td>0.65</td></tr>
+<tr><td>平均 / 衰退 LGD</td><td>55.00% / 70.00%</td><td>0.55 / 0.70</td></tr>
+<tr><td>平均 EL</td><td>77,274.34</td><td>216,152 × 65% × 55% = 77,274.34</td></tr>
+<tr><td>衰退 EL</td><td>98,349.16</td><td>216,152 × 65% × 70% = 98,349.16</td></tr>
+</table>
+<div class="warn"><b>口径风险：</b>页面标题和 LGD 汇总采用 EAD 口径，但 EL 字段采用 exposure_balance 口径。如果监管、模型管理或月末报表要求统一为 EAD，应在批量加工中重算 EL，并对历史批次进行版本化留痕，不能只修改前端展示。</div>
+
+<h2>5. 产品 LGD 结构计算规则</h2>
+<p>产品结构按 product_type 分组。每个产品分别计算笔数、EAD、EAD 加权平均 LGD、EAD 加权衰退 LGD、EAD 加权回收率和 EL 汇总，并按 EAD 从高到低排序。</p>
+<table>
+<tr><th>产品</th><th>笔数</th><th>EAD</th><th>平均LGD</th><th>衰退LGD</th><th>回收率</th></tr>
+<tr><td>固定资产贷款</td><td>200</td><td>¥59,873,940.00</td><td>35.00%</td><td>45.00%</td><td>65.00%</td></tr>
+<tr><td>流动资金贷款</td><td>200</td><td>¥45,228,330.00</td><td>37.97%</td><td>48.71%</td><td>62.03%</td></tr>
+</table>
+<p>固定资产贷款全部记录采用 35%/45% LGD，因此加权结果仍为 35%/45%。流动资金贷款中包含 30 笔高风险样本（平均 LGD 55%、衰退 LGD 70%），其余记录为 35%/45%，加权后形成 37.97%/48.71%。</p>
+<div class="formula">产品加权LGD = Σ(该产品EADᵢ × 该产品LGDᵢ) ÷ Σ该产品EADᵢ</div>
+<p>页面条形长度直接使用相应比例值乘以 100%，仅是视觉表达，不参与业务计算。</p>
+
+<h2>6. 行业敞口与衰退损失规则</h2>
+<p>行业由风险敞口表按 customer_no 关联客户信息表取得。无法匹配或行业为空时归入“未分类”。每个行业采用与总览相同的 EAD 加权公式。</p>
+<table>
+<tr><th>行业</th><th>EAD</th><th>衰退LGD</th><th>衰退EL</th></tr>
+<tr><td>Manufacturing</td><td>¥21,068,670.00</td><td>47.67%</td><td>¥617,187.35</td></tr>
+<tr><td>Transportation</td><td>¥21,044,562.00</td><td>45.00%</td><td>¥270,572.94</td></tr>
+<tr><td>Construction</td><td>¥21,020,454.00</td><td>45.00%</td><td>¥270,262.98</td></tr>
+<tr><td>Technology Service</td><td>¥20,996,346.00</td><td>47.66%</td><td>¥1,207,972.75</td></tr>
+<tr><td>Wholesale</td><td>¥20,972,238.00</td><td>47.66%</td><td>¥508,386.06</td></tr>
+</table>
+<div class="formula">行业衰退LGD = Σ(行业EADᵢ × 衰退LGDᵢ) ÷ Σ行业EADᵢ</div>
+<div class="formula">行业衰退EL = Σ 行业内已落库 el_downturn</div>
+<p>因此，行业 EAD 与衰退 LGD 接近，并不意味着行业衰退 EL 接近。EL 还受到 PD 和风险余额规模影响，截图中 Technology Service 的衰退 EL 明显更高，说明该行业包含更高 PD 的记录。</p>
+
+<h2>7. 债项台账衍生指标</h2>
+<table>
+<tr><th>指标</th><th>公式</th><th>说明</th></tr>
+<tr><td>LGD 差值</td><td>lgd_downturn－lgd_avg</td><td>反映衰退情景相对平均情景的绝对上升幅度</td></tr>
+<tr><td>保障覆盖率</td><td>(collateral_value＋guaranteed_amount)÷EAD</td><td>EAD 大于 0 时计算；衡量押品和保证覆盖</td></tr>
+<tr><td>衰退损失敞口</td><td>EAD × lgd_downturn</td><td>用于敏感性和排序，不等同于 EL，因为没有乘 PD</td></tr>
+<tr><td>平均 EL</td><td>读取 el_avg</td><td>当前样本由风险余额×PD×平均LGD生成</td></tr>
+<tr><td>衰退 EL</td><td>读取 el_downturn</td><td>当前样本由风险余额×PD×衰退LGD生成</td></tr>
+</table>
+
+<h2>8. 压力测试规则</h2>
+<p>压力测试针对每笔有效敞口调整衰退 LGD。基础参数可由请求覆盖；未覆盖时使用系统默认值。</p>
+<div class="formula">覆盖影响 = MAX(1－MIN(覆盖率,1),0) × 押品折扣率 × 20%</div>
+<div class="formula">回收影响 = MAX(1－MIN(回收率,1),0) × 回收折扣率 × 15%</div>
+<div class="formula">压力LGD = MIN(原衰退LGD＋LGD附加值＋覆盖影响＋回收影响, 100%)</div>
+<div class="formula">当前压力基准EL = EAD × PD × 原衰退LGD<br>压力EL = EAD × PD × 压力LGD<br>EL增量 = 压力EL－当前压力基准EL</div>
+<table>
+<tr><th>场景</th><th>LGD附加值</th><th>回收折扣率</th><th>押品折扣率</th></tr>
+<tr><td>回收延迟 RECOVERY_DELAY</td><td>6%</td><td>18%</td><td>10%</td></tr>
+<tr><td>行业回收下降 INDUSTRY_RECOVERY_DOWN</td><td>10%</td><td>12%</td><td>10%</td></tr>
+<tr><td>押品价值下降 COLLATERAL_HAIRCUT</td><td>8%</td><td>12%</td><td>30%</td></tr>
+</table>
+<div class="notice">压力测试中的 EL 使用 EAD×PD×LGD，而顶部总览 EL 汇总读取当前已落库字段。两处口径目前不完全一致，分析对比时需明确标注。</div>
+
+<h2>9. 数据日期、版本与审计规则</h2>
+<ol>
+<li><b>页面数据日期：</b>取全部有效敞口中的 MAX(data_date)，并不代表所有有效记录都严格等于该日期。</li>
+<li><b>模型参数版本：</b>LGD 参数按模型版本和分群维度保存，可区分全部组合、产品等分群。</li>
+<li><b>计算快照：</b>保存模型版本、源数据日期、敞口数、EAD、加权 LGD、EL、运行人和运行时间。</li>
+<li><b>基准模型：</b>系统没有已发布基准时，可根据当前总览与产品加权结果生成基准参数。</li>
+<li><b>压力结果：</b>压力测试为分析结果，不覆盖基础敞口的原始 LGD 和 EL。</li>
+</ol>
+<div class="warn"><b>月末批量系统注意：</b>当前 LGD 总览查询的是有效敞口现状表，不是强制锁定的月末快照。若该页面用于正式月末报告，建议必须传入批次号/数据日期并仅查询已核验、已封版批次。</div>
+
+<h2>10. 展示与舍入规则</h2>
+<table>
+<tr><th>类型</th><th>规则</th></tr>
+<tr><td>金额</td><td>人民币元，千分位，保留 2 位小数</td></tr>
+<tr><td>比例</td><td>数据库 0～1 小数乘以 100，保留 2 位小数</td></tr>
+<tr><td>差值</td><td>衰退率减平均率后转百分比；正数显示“+”</td></tr>
+<tr><td>万元</td><td>金额除以 10,000 后展示，通常保留 2 位</td></tr>
+<tr><td>空值</td><td>汇总 SQL 使用 0 兜底；行业空值归“未分类”</td></tr>
+</table>
+
+<h2>11. 数据质量校验规则</h2>
+<table>
+<tr><th>校验项</th><th>建议规则</th><th>异常处理</th></tr>
+<tr><td>比例范围</td><td>0 ≤ PD、LGD、回收率 ≤ 1</td><td>批次阻断或转异常清单</td></tr>
+<tr><td>金额范围</td><td>EAD、风险余额、EL ≥ 0</td><td>禁止进入正式批次</td></tr>
+<tr><td>EL一致性</td><td>|落库EL－指定本金口径×PD×LGD| ≤ 0.01</td><td>标记计算口径或重算</td></tr>
+<tr><td>日期一致性</td><td>正式月末批次记录 data_date 应等于批次数据日期</td><td>剔除跨期记录</td></tr>
+<tr><td>关联完整性</td><td>客户、合同、债项、支用与敞口可追溯</td><td>进入数据质量问题池</td></tr>
+<tr><td>汇总勾稽</td><td>产品/行业 EAD 合计应等于总 EAD</td><td>阻断报表发布</td></tr>
+<tr><td>权重分母</td><td>ΣEAD=0 时加权比例返回0，不允许除零</td><td>展示“无有效敞口”</td></tr>
+</table>
+
+<h2>12. 口径改进建议</h2>
+<ol>
+<li><b>统一 EL 本金口径。</b>明确采用 EAD 还是 exposure_balance。若系统定位为 PD/LGD/EAD 风险计量平台，建议正式计量统一为 EAD×PD×LGD。</li>
+<li><b>区分“百分点”和“相对增幅”。</b>将“较平均值 +10.32%”改为“较平均值 +10.32 个百分点”。</li>
+<li><b>固定月末批次。</b>LGD 页面增加批次选择和封版状态，避免 MAX(data_date) 与混合日期记录造成误解。</li>
+<li><b>记录计算口径版本。</b>快照中保存本金口径、模型版本、参数版本、舍入方式和数据批次号。</li>
+<li><b>指标可解释。</b>页面为每个指标提供公式说明、分子分母、纳入记录数和明细下钻。</li>
+<li><b>建立自动勾稽。</b>每月检查总览、产品、行业、客户和债项层级的 EAD/EL 合计一致性。</li>
+</ol>
+
+<h2>13. 截图数值复核结论</h2>
+<table>
+<tr><th>复核项</th><th>结论</th></tr>
+<tr><td>EAD、笔数、户数</td><td>与 400 笔有效敞口、100 户客户汇总一致</td></tr>
+<tr><td>平均/衰退 LGD</td><td>与 EAD 加权计算一致</td></tr>
+<tr><td>回收率</td><td>与 EAD 加权计算一致</td></tr>
+<tr><td>高 LGD 敞口</td><td>与“衰退 LGD ≥60%”的 30 笔记录汇总一致</td></tr>
+<tr><td>平均/衰退 EL</td><td>与落库 EL 字段求和一致；落库字段使用风险敞口余额口径</td></tr>
+<tr><td>产品结构</td><td>与按产品分组后 EAD 加权结果一致</td></tr>
+<tr><td>行业结构</td><td>与客户行业关联并按行业分组结果一致</td></tr>
+</table>
+
+<p class="small">本说明书依据 2026-07-24 本地组合风险系统代码和数据库数据核验形成。后续如调整模型、批次口径、阈值或数据源，应同步更新本文档版本并保留变更记录。</p>
+</body>
+</html>

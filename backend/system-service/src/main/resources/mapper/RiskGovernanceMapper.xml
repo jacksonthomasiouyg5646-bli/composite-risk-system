@@ -1,0 +1,430 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.RiskGovernanceMapper">
+
+    <select id="listDataQualityChecks" resultType="map">
+        select 'CUSTOMER_RATING_COVERAGE' as check_code, '有效客户评级覆盖' as check_name, 'HIGH' as severity,
+               count(c.id) as record_total,
+               ifnull(sum(r.id is null), 0) as issue_count
+        from corporate_customer c
+        left join corporate_rating r on r.active_customer_no = c.customer_no
+        where c.deleted_flag = 0
+        union all
+        select 'CUSTOMER_LIMIT_COVERAGE', '有效客户额度覆盖', 'HIGH',
+               count(c.id), ifnull(sum(l.id is null), 0)
+        from corporate_customer c
+        left join corporate_credit_limit l on l.active_customer_no = c.customer_no
+        where c.deleted_flag = 0
+        union all
+        select 'CONTRACT_APPLICATION_RELATION', '合同申请关联完整性', 'CRITICAL',
+               count(c.id), ifnull(sum(a.id is null), 0)
+        from corporate_credit_contract c
+        left join corporate_credit_application a on a.application_no = c.application_no_snapshot and a.deleted_flag = 0
+        where c.deleted_flag = 0
+        union all
+        select 'DRAWDOWN_CONTRACT_RELATION', '支用合同关联完整性', 'CRITICAL',
+               count(d.id), ifnull(sum(c.id is null), 0)
+        from corporate_credit_drawdown d
+        left join corporate_credit_contract c on c.contract_no = d.contract_no_snapshot and c.deleted_flag = 0
+        where d.deleted_flag = 0
+        union all
+        select 'EXPOSURE_DRAWDOWN_RELATION', '风险敞口支用关联完整性', 'HIGH',
+               count(e.id), ifnull(sum(d.id is null), 0)
+        from corporate_risk_exposure e
+        left join corporate_credit_drawdown d on d.drawdown_no = e.drawdown_no and d.deleted_flag = 0
+        where e.deleted_flag = 0 and e.drawdown_no is not null
+        union all
+        select 'COLLATERAL_CONTRACT_RELATION', '合同押品关联完整性', 'MEDIUM',
+               count(r.id), ifnull(sum(c.id is null or p.id is null), 0)
+        from corporate_credit_contract_collateral r
+        left join corporate_credit_contract c on c.contract_no = r.contract_no and c.deleted_flag = 0
+        left join corporate_credit_collateral p on p.collateral_no = r.collateral_no and p.deleted_flag = 0
+        where r.deleted_flag = 0
+        union all
+        select 'OVERDUE_DEBT_REFERENCE', '逾期债项引用完整性', 'HIGH',
+               count(o.id), ifnull(sum(d.id is null), 0)
+        from corporate_credit_overdue o
+        left join corporate_credit_drawdown d on d.debt_no = o.debt_no and d.deleted_flag = 0
+        where o.deleted_flag = 0
+        union all
+        select 'DEFAULT_CUSTOMER_REFERENCE', '违约客户引用完整性', 'CRITICAL',
+               count(d.id), ifnull(sum(c.id is null), 0)
+        from corporate_debt_default d
+        left join corporate_customer c on c.customer_no = d.customer_no and c.deleted_flag = 0
+        where d.deleted_flag = 0
+    </select>
+
+    <select id="listDataLineage" resultType="map">
+        select domain_name, entity_name, source_table, business_key, key_fields, freshness_sla_hours, sensitivity_level, enabled, updated_at
+        from risk_data_lineage
+        where enabled = 1
+        order by domain_name, id
+    </select>
+
+    <select id="getLatestDataQualitySnapshot" resultType="map">
+        select snapshot_date, quality_score, check_total, pass_count, warning_count, failed_count, issue_total, detail_json, captured_at
+        from risk_data_quality_snapshot
+        order by snapshot_date desc, id desc
+        limit 1
+    </select>
+
+    <insert id="upsertDataQualitySnapshot" parameterType="map">
+        insert into risk_data_quality_snapshot
+          (snapshot_date, quality_score, check_total, pass_count, warning_count, failed_count, issue_total, detail_json, captured_at)
+        values
+          (#{snapshot_date}, #{quality_score}, #{check_total}, #{pass_count}, #{warning_count}, #{failed_count}, #{issue_total}, #{detail_json}, #{captured_at})
+        on duplicate key update
+          quality_score = values(quality_score), check_total = values(check_total), pass_count = values(pass_count),
+          warning_count = values(warning_count), failed_count = values(failed_count), issue_total = values(issue_total),
+          detail_json = values(detail_json), captured_at = values(captured_at)
+    </insert>
+
+    <select id="listModelVersions" resultType="map">
+        select id, version_code, version_name, status, baseline_version_id, rule_count, created_by, submitted_by, approved_by,
+               approval_comment, simulation_summary, simulated_at, submitted_at, approved_at, published_at, created_at, updated_at
+        from risk_model_version
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="getModelVersion" resultType="map">
+        select id, version_code, version_name, status, baseline_version_id, rule_count, created_by, submitted_by, approved_by,
+               approval_comment, simulation_summary, simulated_at, submitted_at, approved_at, published_at, created_at, updated_at
+        from risk_model_version
+        where id = #{id}
+    </select>
+
+    <select id="getPublishedModelVersion" resultType="map">
+        select id, version_code, version_name, status, baseline_version_id, rule_count, created_by, submitted_by, approved_by,
+               approval_comment, simulation_summary, simulated_at, submitted_at, approved_at, published_at, created_at, updated_at
+        from risk_model_version
+        where status = 'PUBLISHED'
+        order by published_at desc, id desc
+        limit 1
+    </select>
+
+    <select id="listModelVersionRules" resultType="map">
+        select id, version_id, rule_code, rule_name, metric_key, operator_type, threshold_value, effect_type, score_value,
+               risk_tag, reason_template, enabled, sort_order, created_at, updated_at
+        from risk_model_version_rule
+        where version_id = #{versionId}
+        order by sort_order, id
+    </select>
+
+    <select id="listModelApprovalLogs" resultType="map">
+        select id, version_id, action_type, decision, operator, comment, created_at
+        from risk_model_approval_log
+        where version_id = #{versionId}
+        order by id desc
+    </select>
+
+    <insert id="insertModelVersion" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_model_version
+          (version_code, version_name, status, baseline_version_id, rule_count, created_by)
+        values
+          (#{version_code}, #{version_name}, #{status}, #{baseline_version_id}, #{rule_count}, #{created_by})
+    </insert>
+
+    <insert id="copyActiveRulesToVersion">
+        insert into risk_model_version_rule
+          (version_id, rule_code, rule_name, metric_key, operator_type, threshold_value, effect_type, score_value, risk_tag, reason_template, enabled, sort_order)
+        select #{versionId}, rule_code, rule_name, metric_key, operator_type, threshold_value, effect_type, score_value, risk_tag, reason_template, enabled, sort_order
+        from risk_scoring_rule
+    </insert>
+
+    <update id="updateModelVersionRule">
+        update risk_model_version_rule
+        <set>
+            <if test="body.rule_name != null">rule_name = #{body.rule_name},</if>
+            <if test="body.metric_key != null">metric_key = #{body.metric_key},</if>
+            <if test="body.operator_type != null">operator_type = #{body.operator_type},</if>
+            <if test="body.threshold_value != null">threshold_value = #{body.threshold_value},</if>
+            <if test="body.effect_type != null">effect_type = #{body.effect_type},</if>
+            <if test="body.score_value != null">score_value = #{body.score_value},</if>
+            <if test="body.risk_tag != null">risk_tag = #{body.risk_tag},</if>
+            <if test="body.reason_template != null">reason_template = #{body.reason_template},</if>
+            <if test="body.enabled != null">enabled = #{body.enabled},</if>
+            <if test="body.sort_order != null">sort_order = #{body.sort_order},</if>
+        </set>
+        where version_id = #{versionId} and rule_code = #{ruleCode}
+    </update>
+
+    <update id="updateModelVersionSimulation">
+        update risk_model_version
+        set simulation_summary = #{summaryJson}, simulated_at = #{simulatedAt}
+        where id = #{versionId}
+    </update>
+
+    <update id="submitModelVersion">
+        update risk_model_version
+        set status = 'IN_REVIEW', submitted_by = #{operator}, submitted_at = #{submittedAt}
+        where id = #{versionId}
+    </update>
+
+    <update id="approveModelVersion">
+        update risk_model_version
+        set status = 'APPROVED', approved_by = #{operator}, approval_comment = #{comment}, approved_at = #{approvedAt}
+        where id = #{versionId}
+    </update>
+
+    <update id="retirePublishedModelVersions">
+        update risk_model_version
+        set status = 'RETIRED'
+        where status = 'PUBLISHED' and id != #{versionId}
+    </update>
+
+    <insert id="publishRulesFromVersion">
+        insert into risk_scoring_rule
+          (rule_code, rule_name, metric_key, operator_type, threshold_value, effect_type, score_value, risk_tag, reason_template, enabled, sort_order)
+        select rule_code, rule_name, metric_key, operator_type, threshold_value, effect_type, score_value, risk_tag, reason_template, enabled, sort_order
+        from risk_model_version_rule
+        where version_id = #{versionId}
+        on duplicate key update
+          rule_name = values(rule_name), metric_key = values(metric_key), operator_type = values(operator_type),
+          threshold_value = values(threshold_value), effect_type = values(effect_type), score_value = values(score_value),
+          risk_tag = values(risk_tag), reason_template = values(reason_template), enabled = values(enabled), sort_order = values(sort_order)
+    </insert>
+
+    <update id="publishModelVersion">
+        update risk_model_version
+        set status = 'PUBLISHED', approved_by = #{operator}, published_at = #{publishedAt}
+        where id = #{versionId}
+    </update>
+
+    <insert id="insertModelApprovalLog" parameterType="map">
+        insert into risk_model_approval_log (version_id, action_type, decision, operator, comment)
+        values (#{version_id}, #{action_type}, #{decision}, #{operator}, #{comment})
+    </insert>
+
+    <select id="listAlertCases" resultType="map">
+        select c.id, c.customer_no, c.risk_code, c.priority, c.risk_score, c.alert_state, c.owner, c.sla_due_at,
+               c.escalation_level, c.first_detected_at, c.last_detected_at, c.started_at, c.closed_at, c.closure_comment, c.updated_at,
+               u.customer_name, u.industry_name, u.owner_org_name,
+               l.id as link_id, l.last_sync_state, l.last_sync_at,
+               p.id as treatment_plan_id, p.plan_code, p.status as treatment_status, p.progress as treatment_progress, p.due_date as treatment_due_date,
+               e.id as risk_event_id, e.status as event_status,
+               i.id as risk_indicator_id, i.current_value as indicator_current_value, i.status as indicator_status
+        from risk_alert_case c
+        left join corporate_customer u on u.customer_no = c.customer_no
+        left join risk_alert_case_link l on l.alert_case_id = c.id
+        left join risk_treatment_plan p on p.id = l.treatment_plan_id
+        left join risk_event e on e.id = l.risk_event_id
+        left join risk_indicator i on i.id = l.risk_indicator_id
+        <if test="state != null and state != ''">where c.alert_state = #{state}</if>
+        order by c.alert_state = 'OVERDUE' desc, c.sla_due_at asc, c.risk_score desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countAlertCases" resultType="long">
+        select count(*) from risk_alert_case
+        <if test="state != null and state != ''">where alert_state = #{state}</if>
+    </select>
+
+    <select id="getAlertCase" resultType="map">
+        select c.id, c.customer_no, c.risk_code, c.priority, c.risk_score, c.alert_state, c.owner, c.sla_due_at, c.escalation_level,
+               c.first_detected_at, c.last_detected_at, c.started_at, c.closed_at, c.closure_comment, c.updated_at,
+               u.customer_name, u.industry_name, u.owner_org_name
+        from risk_alert_case c
+        left join corporate_customer u on u.customer_no = c.customer_no
+        where c.customer_no = #{customerNo}
+    </select>
+
+    <select id="getAlertCaseSummary" resultType="map">
+        select count(*) as total_count,
+               ifnull(sum(alert_state = 'OPEN'), 0) as open_count,
+               ifnull(sum(alert_state = 'IN_PROGRESS'), 0) as in_progress_count,
+               ifnull(sum(alert_state = 'OVERDUE'), 0) as overdue_count,
+               ifnull(sum(alert_state = 'RESOLVED'), 0) as resolved_count,
+               ifnull(sum(alert_state in ('OPEN', 'IN_PROGRESS', 'OVERDUE') and date(sla_due_at) = current_date), 0) as due_today_count,
+               ifnull(sum(l.id is not null), 0) as linked_count,
+               ifnull(sum(p.status in ('未开始', '进行中', '逾期')), 0) as open_treatment_count
+        from risk_alert_case c
+        left join risk_alert_case_link l on l.alert_case_id = c.id
+        left join risk_treatment_plan p on p.id = l.treatment_plan_id
+    </select>
+
+    <insert id="upsertAlertCase" parameterType="map">
+        insert into risk_alert_case
+          (customer_no, risk_code, priority, risk_score, alert_state, owner, sla_due_at, escalation_level, first_detected_at, last_detected_at)
+        values
+          (#{customer_no}, #{risk_code}, #{priority}, #{risk_score}, #{alert_state}, #{owner}, #{sla_due_at}, 0, #{detected_at}, #{detected_at})
+        on duplicate key update
+          risk_code = values(risk_code), priority = values(priority), risk_score = values(risk_score), owner = values(owner),
+          alert_state = case when alert_state = 'RESOLVED' and values(risk_score) >= risk_score + 10 then 'OPEN' else alert_state end,
+          sla_due_at = case when alert_state in ('OPEN', 'OVERDUE') then values(sla_due_at) else sla_due_at end,
+          escalation_level = case when alert_state = 'OPEN' then 0 else escalation_level end,
+          closed_at = case when alert_state = 'OPEN' then null else closed_at end,
+          closure_comment = case when alert_state = 'OPEN' then null else closure_comment end,
+          last_detected_at = values(last_detected_at)
+    </insert>
+
+    <update id="startAlertCase">
+        update risk_alert_case
+        set alert_state = 'IN_PROGRESS', owner = coalesce(nullif(#{operator}, ''), owner), started_at = coalesce(started_at, #{startedAt})
+        where customer_no = #{customerNo} and alert_state in ('OPEN', 'OVERDUE')
+    </update>
+
+    <update id="closeAlertCase">
+        update risk_alert_case
+        set alert_state = 'RESOLVED', closure_comment = #{comment}, closed_at = #{closedAt}
+        where customer_no = #{customerNo} and alert_state in ('OPEN', 'IN_PROGRESS', 'OVERDUE')
+    </update>
+
+    <update id="escalateOverdueAlertCases">
+        update risk_alert_case
+        set alert_state = 'OVERDUE', escalation_level = least(escalation_level + 1, 3)
+        where alert_state in ('OPEN', 'IN_PROGRESS') and sla_due_at &lt; #{now}
+    </update>
+
+    <select id="listActiveAlertCases" resultType="map">
+        select c.id, c.customer_no, c.risk_code, c.priority, c.risk_score, c.alert_state, c.owner, c.sla_due_at, c.escalation_level,
+               c.first_detected_at, c.last_detected_at, c.started_at, c.closed_at, c.closure_comment, c.updated_at,
+               u.customer_name, u.industry_name, u.owner_org_name
+        from risk_alert_case c
+        left join corporate_customer u on u.customer_no = c.customer_no
+        where c.alert_state in ('OPEN', 'IN_PROGRESS', 'OVERDUE', 'RESOLVED')
+        order by c.id
+    </select>
+
+    <select id="getAlertCaseLink" resultType="map">
+        select id, alert_case_id, risk_code, treatment_plan_id, risk_event_id, risk_indicator_id, last_sync_state, last_sync_at, created_at, updated_at
+        from risk_alert_case_link
+        where alert_case_id = #{alertCaseId}
+    </select>
+
+    <select id="findAlertRiskRegister" resultType="map">
+        select id, risk_code, risk_name, category, `level`, owner_department, responsible_person, status, identified_at, due_date, description
+        from risk_register
+        where risk_code = #{riskCode}
+        limit 1
+    </select>
+
+    <insert id="insertAlertRiskRegister" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_register
+          (risk_code, risk_name, category, `level`, owner_department, responsible_person, status, identified_at, due_date, description)
+        values
+          (#{risk_code}, #{risk_name}, #{category}, #{level}, #{owner_department}, #{responsible_person}, #{status}, #{identified_at}, #{due_date}, #{description})
+    </insert>
+
+    <update id="updateAlertRiskRegister">
+        update risk_register
+        set `level` = #{body.level}, owner_department = #{body.owner_department}, responsible_person = #{body.responsible_person},
+            status = #{body.status}, due_date = #{body.due_date}, description = #{body.description}
+        where id = #{id}
+    </update>
+
+    <select id="findAlertTreatmentPlan" resultType="map">
+        select id, plan_code, risk_code, action, owner, due_date, progress, status
+        from risk_treatment_plan
+        where risk_code = #{riskCode}
+        order by id desc
+        limit 1
+    </select>
+
+    <insert id="insertAlertTreatmentPlan" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_treatment_plan (plan_code, risk_code, action, owner, due_date, progress, status)
+        values (#{plan_code}, #{risk_code}, #{action}, #{owner}, #{due_date}, #{progress}, #{status})
+    </insert>
+
+    <update id="updateAlertTreatmentPlan">
+        update risk_treatment_plan
+        set owner = #{body.owner}, due_date = #{body.due_date}, progress = #{body.progress}, status = #{body.status}
+        where id = #{id}
+    </update>
+
+    <select id="findAlertRiskEvent" resultType="map">
+        select id, event_code, title, risk_code, severity, occurred_at, loss_amount, owner, status, summary
+        from risk_event
+        where event_code = #{eventCode}
+        limit 1
+    </select>
+
+    <insert id="insertAlertRiskEvent" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_event (event_code, title, risk_code, severity, occurred_at, loss_amount, owner, status, summary)
+        values (#{event_code}, #{title}, #{risk_code}, #{severity}, #{occurred_at}, #{loss_amount}, #{owner}, #{status}, #{summary})
+    </insert>
+
+    <update id="updateAlertRiskEvent">
+        update risk_event
+        set severity = #{body.severity}, owner = #{body.owner}, status = #{body.status}, summary = #{body.summary}
+        where id = #{id}
+    </update>
+
+    <select id="findAlertRiskIndicator" resultType="map">
+        select id, indicator_code, name, threshold_value, current_value, trend, owner, status
+        from risk_indicator
+        where indicator_code = #{indicatorCode}
+        limit 1
+    </select>
+
+    <insert id="insertAlertRiskIndicator" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_indicator (indicator_code, name, threshold_value, current_value, trend, owner, status)
+        values (#{indicator_code}, #{name}, #{threshold_value}, #{current_value}, #{trend}, #{owner}, #{status})
+    </insert>
+
+    <update id="updateAlertRiskIndicator">
+        update risk_indicator
+        set current_value = #{body.current_value}, trend = #{body.trend}, owner = #{body.owner}, status = #{body.status}
+        where id = #{id}
+    </update>
+
+    <insert id="upsertAlertCaseLink" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_alert_case_link
+          (alert_case_id, risk_code, treatment_plan_id, risk_event_id, risk_indicator_id, last_sync_state, last_sync_at)
+        values
+          (#{alert_case_id}, #{risk_code}, #{treatment_plan_id}, #{risk_event_id}, #{risk_indicator_id}, #{last_sync_state}, #{last_sync_at})
+        on duplicate key update
+          risk_code = values(risk_code), treatment_plan_id = values(treatment_plan_id), risk_event_id = values(risk_event_id),
+          risk_indicator_id = values(risk_indicator_id), last_sync_state = values(last_sync_state), last_sync_at = values(last_sync_at)
+    </insert>
+
+    <insert id="insertStressTestRun" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_stress_test_run (scenario_code, scenario_name, parameter_json, summary_json, run_by)
+        values (#{scenario_code}, #{scenario_name}, #{parameter_json}, #{summary_json}, #{run_by})
+    </insert>
+
+    <select id="listStressTestRuns" resultType="map">
+        select id, scenario_code, scenario_name, parameter_json, summary_json, run_by, created_at
+        from risk_stress_test_run
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="listCustomerContracts" resultType="map">
+        select contract_no, product_type, contract_amount, contract_status, sign_date, expiry_date
+        from corporate_credit_contract
+        where customer_no_snapshot = #{customerNo} and deleted_flag = 0
+        order by sign_date desc, id desc
+        limit 12
+    </select>
+
+    <select id="listCustomerDrawdowns" resultType="map">
+        select drawdown_no, debt_no, contract_no_snapshot as contract_no, product_type, actual_draw_amount, outstanding_principal_amount, risk_level as drawdown_risk_level
+        from corporate_credit_drawdown
+        where customer_no_snapshot = #{customerNo} and deleted_flag = 0
+        order by drawdown_date desc, id desc
+        limit 20
+    </select>
+
+    <select id="listCustomerCollaterals" resultType="map">
+        select r.contract_no, p.collateral_no, p.collateral_type, p.confirmed_value, r.secured_amount, r.relation_status
+        from corporate_credit_contract_collateral r
+        join corporate_credit_collateral p on p.collateral_no = r.collateral_no and p.deleted_flag = 0
+        where r.customer_no = #{customerNo} and r.deleted_flag = 0
+        order by r.contract_no, p.collateral_no
+        limit 20
+    </select>
+
+    <select id="listManagerPeers" resultType="map">
+        select customer_no, customer_name, industry_name, owner_org_name, relationship_manager_name
+        from corporate_customer
+        where deleted_flag = 0
+          and relationship_manager_name = (
+            select relationship_manager_name from corporate_customer where customer_no = #{customerNo} limit 1
+          )
+          and customer_no != #{customerNo}
+        order by customer_no
+        limit 8
+    </select>
+</mapper>

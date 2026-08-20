@@ -1,0 +1,417 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.RiskMonthEndAnalysisMapper">
+    <select id="countPublishedBatches" resultType="int">
+        select count(*) from risk_month_end_batch where published_flag=1 and locked_flag=1
+    </select>
+
+    <select id="getLatestSourceDataDate" resultType="string">
+        select date_format(max(e.data_date),'%Y-%m-%d')
+        from corporate_risk_exposure e
+        where e.deleted_flag=0 and e.exposure_status='ACTIVE'
+    </select>
+
+    <select id="nextVersion" resultType="int">
+        select ifnull(max(version_no),0)+1 from risk_month_end_batch where month_end_date=#{monthEndDate}
+    </select>
+
+    <insert id="insertBatch" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_month_end_batch
+        (batch_no,month_end_date,source_data_date,version_no,batch_type,source_system,source_batch_no,run_mode,
+         dependency_status,retry_of_batch_id,input_checksum,publish_comment,status,published_flag,locked_flag,created_by)
+        values
+        (#{batch_no},#{month_end_date},#{source_data_date},#{version_no},#{batch_type},#{source_system},#{source_batch_no},
+         #{run_mode},#{dependency_status},#{retry_of_batch_id},#{input_checksum},#{publish_comment},'CALCULATING',0,0,#{created_by})
+    </insert>
+
+    <insert id="insertSourceManifest" parameterType="map">
+        insert into risk_month_end_source_manifest
+        (batch_id,source_name,source_batch_no,data_date,expected_count,received_count,checksum_value,receive_status)
+        values (#{batch_id},#{source_name},#{source_batch_no},#{data_date},#{expected_count},#{received_count},#{checksum_value},#{receive_status})
+    </insert>
+
+    <insert id="insertExposureSnapshots" parameterType="map">
+        insert into risk_month_end_exposure_snapshot
+        (batch_id,month_end_date,exposure_no,customer_no,customer_name,contract_no,debt_no,product_type,industry_name,owner_org_name,
+         rating_result,risk_level,ead_amount,pd,lgd_avg,lgd_downturn,el_avg,el_downturn,exposure_balance,collateral_value,
+         product_recovery_rate,overdue_days,default_flag,five_category,model_name,model_version)
+        select #{batch_id},#{month_end_date},x.exposure_no,x.customer_no,x.customer_name_snapshot,x.contract_no,x.debt_no,x.product_type,
+               x.industry_name,x.owner_org_name,x.adjusted_rating,
+               case
+                 when x.adjusted_overdue_days &gt; 90 or x.adjusted_rating='21' or x.five_category in ('SUBSTANDARD','DOUBTFUL','LOSS','次级','可疑','损失') then 'HIGH'
+                 when x.adjusted_pd &gt;= 0.100000 or x.adjusted_overdue_days &gt;= 60 then 'HIGH'
+                 when x.adjusted_pd &gt;= 0.050000 or x.adjusted_overdue_days &gt; 0 then 'MEDIUM'
+                 else ifnull(x.risk_level,'LOW')
+               end,
+               x.adjusted_ead,x.adjusted_pd,x.adjusted_lgd_avg,x.adjusted_lgd_downturn,
+               round(x.adjusted_ead*x.adjusted_pd*x.adjusted_lgd_avg,2),
+               round(x.adjusted_ead*x.adjusted_pd*x.adjusted_lgd_downturn,2),
+               round(x.exposure_balance*#{ead_factor},2),round(x.collateral_value*#{collateral_factor},2),
+               greatest(0,least(1,x.product_recovery_rate-#{lgd_delta})),x.adjusted_overdue_days,
+               case when x.adjusted_overdue_days &gt; 90 or x.adjusted_rating='21' or x.five_category in ('SUBSTANDARD','DOUBTFUL','LOSS','次级','可疑','损失') then 1 else 0 end,
+               x.five_category,x.model_name,x.model_version
+        from (
+          select e.*,
+                 ifnull(c.industry_name,'未分类') as industry_name,
+                 ifnull(c.owner_org_name,'未分配机构') as owner_org_name,
+                 round(greatest(0,e.ead_amount*#{ead_factor}),2) as adjusted_ead,
+                 least(1,greatest(0,e.pd*#{pd_factor})) as adjusted_pd,
+                 least(1,greatest(0,e.lgd_avg+#{lgd_delta})) as adjusted_lgd_avg,
+                 least(1,greatest(0,e.lgd_downturn+#{lgd_delta})) as adjusted_lgd_downturn,
+                 greatest(0,e.overdue_days+#{overdue_delta}) as adjusted_overdue_days,
+                 case when e.rating_result regexp '^[0-9]+$'
+                      then cast(greatest(1,least(21,cast(e.rating_result as unsigned)+#{rating_shift})) as char)
+                      else e.rating_result end as adjusted_rating
+          from corporate_risk_exposure e
+          left join corporate_customer c on c.customer_no=e.customer_no and c.deleted_flag=0
+          where e.deleted_flag=0 and e.exposure_status='ACTIVE'
+            and mod(crc32(concat(e.exposure_no,date_format(#{month_end_date},'%Y%m%d'))),100) &lt; #{inclusion_threshold}
+        ) x
+    </insert>
+
+    <insert id="insertCustomerSnapshots">
+        insert into risk_month_end_customer_snapshot
+        (batch_id,month_end_date,customer_no,customer_name,industry_name,owner_org_name,rating_result,risk_level,active_debt_count,
+         ead_amount,weighted_pd,weighted_lgd_avg,weighted_lgd_downturn,el_avg_amount,el_downturn_amount,collateral_value,
+         overdue_count,max_overdue_days,default_debt_count,default_flag,high_risk_flag)
+        select batch_id,max(month_end_date),customer_no,max(customer_name),max(industry_name),max(owner_org_name),max(rating_result),
+               case max(case risk_level when 'HIGH' then 3 when '极高风险' then 3 when 'MEDIUM' then 2 when '中风险' then 2 else 1 end)
+                 when 3 then 'HIGH' when 2 then 'MEDIUM' else 'LOW' end,
+               count(distinct exposure_no),sum(ead_amount),
+               case when sum(ead_amount)&gt;0 then round(sum(ead_amount*pd)/sum(ead_amount),6) else 0 end,
+               case when sum(ead_amount)&gt;0 then round(sum(ead_amount*lgd_avg)/sum(ead_amount),6) else 0 end,
+               case when sum(ead_amount)&gt;0 then round(sum(ead_amount*lgd_downturn)/sum(ead_amount),6) else 0 end,
+               sum(el_avg),sum(el_downturn),sum(collateral_value),
+               sum(overdue_days&gt;0),max(overdue_days),sum(default_flag=1),max(default_flag),
+               max(case when default_flag=1 or risk_level in ('HIGH','极高风险','高风险') then 1 else 0 end)
+        from risk_month_end_exposure_snapshot
+        where batch_id=#{batchId}
+        group by batch_id,customer_no
+    </insert>
+
+    <insert id="insertPortfolioSummary">
+        insert into risk_month_end_summary
+        (batch_id,month_end_date,dimension_type,dimension_code,dimension_name,customer_count,exposure_count,high_risk_count,
+         overdue_count,default_count,ead_amount,weighted_pd,weighted_lgd_avg,weighted_lgd_downturn,el_avg_amount,el_downturn_amount,concentration_ratio)
+        select #{batchId},max(month_end_date),'PORTFOLIO','ALL','全部组合',count(distinct customer_no),count(*),
+               count(distinct case when risk_level in ('HIGH','高风险','极高风险') or default_flag=1 then customer_no end),
+               sum(overdue_days&gt;0),sum(default_flag=1),sum(ead_amount),
+               case when sum(ead_amount)&gt;0 then round(sum(ead_amount*pd)/sum(ead_amount),6) else 0 end,
+               case when sum(ead_amount)&gt;0 then round(sum(ead_amount*lgd_avg)/sum(ead_amount),6) else 0 end,
+               case when sum(ead_amount)&gt;0 then round(sum(ead_amount*lgd_downturn)/sum(ead_amount),6) else 0 end,
+               sum(el_avg),sum(el_downturn),1
+        from risk_month_end_exposure_snapshot where batch_id=#{batchId}
+    </insert>
+
+    <insert id="insertIndustrySummary">
+        insert into risk_month_end_summary
+        (batch_id,month_end_date,dimension_type,dimension_code,dimension_name,customer_count,exposure_count,high_risk_count,
+         overdue_count,default_count,ead_amount,weighted_pd,weighted_lgd_avg,weighted_lgd_downturn,el_avg_amount,el_downturn_amount,concentration_ratio)
+        select #{batchId},max(e.month_end_date),'INDUSTRY',ifnull(e.industry_name,'未分类'),ifnull(e.industry_name,'未分类'),
+               count(distinct e.customer_no),count(*),count(distinct case when e.risk_level in ('HIGH','高风险','极高风险') or e.default_flag=1 then e.customer_no end),
+               sum(e.overdue_days&gt;0),sum(e.default_flag=1),sum(e.ead_amount),
+               case when sum(e.ead_amount)&gt;0 then round(sum(e.ead_amount*e.pd)/sum(e.ead_amount),6) else 0 end,
+               case when sum(e.ead_amount)&gt;0 then round(sum(e.ead_amount*e.lgd_avg)/sum(e.ead_amount),6) else 0 end,
+               case when sum(e.ead_amount)&gt;0 then round(sum(e.ead_amount*e.lgd_downturn)/sum(e.ead_amount),6) else 0 end,
+               sum(e.el_avg),sum(e.el_downturn),case when max(t.total_ead)&gt;0 then round(sum(e.ead_amount)/max(t.total_ead),6) else 0 end
+        from risk_month_end_exposure_snapshot e
+        cross join (select sum(ead_amount) total_ead from risk_month_end_exposure_snapshot where batch_id=#{batchId}) t
+        where e.batch_id=#{batchId}
+        group by ifnull(e.industry_name,'未分类')
+    </insert>
+
+    <insert id="insertProductSummary">
+        insert into risk_month_end_summary
+        (batch_id,month_end_date,dimension_type,dimension_code,dimension_name,customer_count,exposure_count,high_risk_count,
+         overdue_count,default_count,ead_amount,weighted_pd,weighted_lgd_avg,weighted_lgd_downturn,el_avg_amount,el_downturn_amount,concentration_ratio)
+        select #{batchId},max(e.month_end_date),'PRODUCT',e.product_type,e.product_type,
+               count(distinct e.customer_no),count(*),count(distinct case when e.risk_level in ('HIGH','高风险','极高风险') or e.default_flag=1 then e.customer_no end),
+               sum(e.overdue_days&gt;0),sum(e.default_flag=1),sum(e.ead_amount),
+               case when sum(e.ead_amount)&gt;0 then round(sum(e.ead_amount*e.pd)/sum(e.ead_amount),6) else 0 end,
+               case when sum(e.ead_amount)&gt;0 then round(sum(e.ead_amount*e.lgd_avg)/sum(e.ead_amount),6) else 0 end,
+               case when sum(e.ead_amount)&gt;0 then round(sum(e.ead_amount*e.lgd_downturn)/sum(e.ead_amount),6) else 0 end,
+               sum(e.el_avg),sum(e.el_downturn),case when max(t.total_ead)&gt;0 then round(sum(e.ead_amount)/max(t.total_ead),6) else 0 end
+        from risk_month_end_exposure_snapshot e
+        cross join (select sum(ead_amount) total_ead from risk_month_end_exposure_snapshot where batch_id=#{batchId}) t
+        where e.batch_id=#{batchId}
+        group by e.product_type
+    </insert>
+
+    <insert id="insertOrganizationSummary">
+        insert into risk_month_end_summary
+        (batch_id,month_end_date,dimension_type,dimension_code,dimension_name,customer_count,exposure_count,high_risk_count,
+         overdue_count,default_count,ead_amount,weighted_pd,weighted_lgd_avg,weighted_lgd_downturn,el_avg_amount,el_downturn_amount,concentration_ratio)
+        select #{batchId},max(e.month_end_date),'ORGANIZATION',ifnull(e.owner_org_name,'未分配机构'),ifnull(e.owner_org_name,'未分配机构'),
+               count(distinct e.customer_no),count(*),count(distinct case when e.risk_level in ('HIGH','高风险','极高风险') or e.default_flag=1 then e.customer_no end),
+               sum(e.overdue_days&gt;0),sum(e.default_flag=1),sum(e.ead_amount),
+               case when sum(e.ead_amount)&gt;0 then round(sum(e.ead_amount*e.pd)/sum(e.ead_amount),6) else 0 end,
+               case when sum(e.ead_amount)&gt;0 then round(sum(e.ead_amount*e.lgd_avg)/sum(e.ead_amount),6) else 0 end,
+               case when sum(e.ead_amount)&gt;0 then round(sum(e.ead_amount*e.lgd_downturn)/sum(e.ead_amount),6) else 0 end,
+               sum(e.el_avg),sum(e.el_downturn),case when max(t.total_ead)&gt;0 then round(sum(e.ead_amount)/max(t.total_ead),6) else 0 end
+        from risk_month_end_exposure_snapshot e
+        cross join (select sum(ead_amount) total_ead from risk_month_end_exposure_snapshot where batch_id=#{batchId}) t
+        where e.batch_id=#{batchId}
+        group by ifnull(e.owner_org_name,'未分配机构')
+    </insert>
+
+    <select id="getSnapshotStats" resultType="map">
+        select count(*) record_count,count(distinct customer_no) customer_count,ifnull(sum(ead_amount),0) total_ead,
+               ifnull(sum(el_avg),0) total_el_avg,ifnull(sum(el_downturn),0) total_el_downturn
+        from risk_month_end_exposure_snapshot where batch_id=#{batchId}
+    </select>
+
+    <select id="getCurrentSourceStats" resultType="map">
+        select count(*) record_count,count(distinct customer_no) customer_count,ifnull(sum(ead_amount),0) total_ead
+        from corporate_risk_exposure where deleted_flag=0 and exposure_status='ACTIVE'
+    </select>
+
+    <select id="getDataQualityStats" resultType="map">
+        select count(*)-count(distinct exposure_no) duplicate_count,
+               sum(customer_no is null or customer_no='' or contract_no is null or contract_no='' or debt_no is null or debt_no='') missing_link_count,
+               sum(pd&lt;0 or pd&gt;1 or lgd_avg&lt;0 or lgd_avg&gt;1 or lgd_downturn&lt;0 or lgd_downturn&gt;1 or ead_amount&lt;0) invalid_parameter_count
+        from risk_month_end_exposure_snapshot where batch_id=#{batchId}
+    </select>
+
+    <update id="completeBatch" parameterType="map">
+        update risk_month_end_batch
+        set status='LOCKED',published_flag=1,locked_flag=1,record_count=#{record_count},customer_count=#{customer_count},
+            total_ead=#{total_ead},total_el_avg=#{total_el_avg},total_el_downturn=#{total_el_downturn},
+            quality_score=#{quality_score},reconciliation_status=#{reconciliation_status},
+            completed_at=current_timestamp,published_at=current_timestamp
+        where id=#{id}
+    </update>
+
+    <insert id="insertReconciliation" parameterType="map">
+        insert into risk_month_end_reconciliation
+        (batch_id,check_code,check_name,source_value,snapshot_value,difference_value,tolerance_value,check_status,detail_message)
+        values (#{batch_id},#{check_code},#{check_name},#{source_value},#{snapshot_value},#{difference_value},#{tolerance_value},#{check_status},#{detail_message})
+        on duplicate key update source_value=values(source_value),snapshot_value=values(snapshot_value),difference_value=values(difference_value),
+          tolerance_value=values(tolerance_value),check_status=values(check_status),detail_message=values(detail_message),created_at=current_timestamp
+    </insert>
+
+    <select id="listPublishedBatches" resultType="map">
+        select id,batch_no,date_format(month_end_date,'%Y-%m-%d') month_end_date,date_format(source_data_date,'%Y-%m-%d') source_data_date,
+               version_no,batch_type,source_system,status,published_flag,locked_flag,record_count,customer_count,total_ead,total_el_avg,total_el_downturn,
+               quality_score,reconciliation_status,published_at
+        from risk_month_end_batch where published_flag=1 and locked_flag=1 order by month_end_date desc,version_no desc
+    </select>
+
+    <select id="findPublishedBatchByMonth" resultType="map">
+        select * from risk_month_end_batch where month_end_date=#{monthEndDate} and published_flag=1 order by version_no desc limit 1
+    </select>
+    <select id="findLatestPublishedBatch" resultType="map">
+        select * from risk_month_end_batch where published_flag=1 order by month_end_date desc,version_no desc limit 1
+    </select>
+    <select id="findPreviousPublishedBatch" resultType="map">
+        select * from risk_month_end_batch where published_flag=1 and month_end_date&lt;#{monthEndDate} order by month_end_date desc,version_no desc limit 1
+    </select>
+
+    <select id="countChangeDetails" resultType="int">
+        select count(*) from risk_month_end_change_detail where current_batch_id=#{currentBatchId} and base_batch_id=#{baseBatchId}
+    </select>
+    <delete id="deleteChangeDetails">
+        delete from risk_month_end_change_detail where current_batch_id=#{currentBatchId} and base_batch_id=#{baseBatchId}
+    </delete>
+
+    <insert id="insertCurrentChangeDetails">
+        insert into risk_month_end_change_detail
+        (current_batch_id,base_batch_id,grain_type,business_key,customer_no,customer_name,contract_no,debt_no,industry_name,product_type,
+         previous_rating,current_rating,previous_risk_level,current_risk_level,previous_ead,current_ead,ead_delta,
+         previous_pd,current_pd,pd_delta,previous_lgd,current_lgd,lgd_delta,previous_el,current_el,el_delta,
+         previous_overdue_days,current_overdue_days,previous_default_flag,current_default_flag,change_type,reason_code)
+        select z.current_batch_id,z.base_batch_id,'DEBT',z.business_key,z.customer_no,z.customer_name,z.contract_no,z.debt_no,z.industry_name,z.product_type,
+               z.previous_rating,z.current_rating,z.previous_risk_level,z.current_risk_level,z.previous_ead,z.current_ead,z.ead_delta,
+               z.previous_pd,z.current_pd,z.pd_delta,z.previous_lgd,z.current_lgd,z.lgd_delta,z.previous_el,z.current_el,z.el_delta,
+               z.previous_overdue_days,z.current_overdue_days,z.previous_default_flag,z.current_default_flag,z.change_type,z.change_type
+        from (
+          select #{currentBatchId} current_batch_id,#{baseBatchId} base_batch_id,c.exposure_no business_key,c.customer_no,c.customer_name,
+                 c.contract_no,c.debt_no,c.industry_name,c.product_type,b.rating_result previous_rating,c.rating_result current_rating,
+                 b.risk_level previous_risk_level,c.risk_level current_risk_level,ifnull(b.ead_amount,0) previous_ead,c.ead_amount current_ead,
+                 c.ead_amount-ifnull(b.ead_amount,0) ead_delta,ifnull(b.pd,0) previous_pd,c.pd current_pd,c.pd-ifnull(b.pd,0) pd_delta,
+                 ifnull(b.lgd_downturn,0) previous_lgd,c.lgd_downturn current_lgd,c.lgd_downturn-ifnull(b.lgd_downturn,0) lgd_delta,
+                 ifnull(b.el_downturn,0) previous_el,c.el_downturn current_el,c.el_downturn-ifnull(b.el_downturn,0) el_delta,
+                 ifnull(b.overdue_days,0) previous_overdue_days,c.overdue_days current_overdue_days,ifnull(b.default_flag,0) previous_default_flag,c.default_flag current_default_flag,
+                 case
+                   when b.id is null then 'NEW'
+                   when c.default_flag=1 and b.default_flag=0 then 'NEW_DEFAULT'
+                   when c.default_flag=0 and b.default_flag=1 then 'CURED'
+                   when (case c.risk_level when 'HIGH' then 3 when 'MEDIUM' then 2 else 1 end)&gt;(case b.risk_level when 'HIGH' then 3 when 'MEDIUM' then 2 else 1 end) then 'DOWNGRADE'
+                   when (case c.risk_level when 'HIGH' then 3 when 'MEDIUM' then 2 else 1 end)&lt;(case b.risk_level when 'HIGH' then 3 when 'MEDIUM' then 2 else 1 end) then 'UPGRADE'
+                   when c.ead_amount&gt;b.ead_amount*1.05 then 'EXPOSURE_INCREASE'
+                   when c.ead_amount&lt;b.ead_amount*0.95 then 'EXPOSURE_DECREASE'
+                   when abs(c.pd-b.pd)&gt;=0.005 or abs(c.lgd_downturn-b.lgd_downturn)&gt;=0.01 then 'PARAM_CHANGE'
+                   else 'STABLE'
+                 end change_type
+          from risk_month_end_exposure_snapshot c
+          left join risk_month_end_exposure_snapshot b on b.batch_id=#{baseBatchId} and b.exposure_no=c.exposure_no
+          where c.batch_id=#{currentBatchId}
+        ) z
+    </insert>
+
+    <insert id="insertExitChangeDetails">
+        insert into risk_month_end_change_detail
+        (current_batch_id,base_batch_id,grain_type,business_key,customer_no,customer_name,contract_no,debt_no,industry_name,product_type,
+         previous_rating,current_rating,previous_risk_level,current_risk_level,previous_ead,current_ead,ead_delta,
+         previous_pd,current_pd,pd_delta,previous_lgd,current_lgd,lgd_delta,previous_el,current_el,el_delta,
+         previous_overdue_days,current_overdue_days,previous_default_flag,current_default_flag,change_type,reason_code)
+        select #{currentBatchId},#{baseBatchId},'DEBT',b.exposure_no,b.customer_no,b.customer_name,b.contract_no,b.debt_no,b.industry_name,b.product_type,
+               b.rating_result,null,b.risk_level,null,b.ead_amount,0,-b.ead_amount,b.pd,0,-b.pd,b.lgd_downturn,0,-b.lgd_downturn,
+               b.el_downturn,0,-b.el_downturn,b.overdue_days,0,b.default_flag,0,'EXIT','EXIT'
+        from risk_month_end_exposure_snapshot b
+        left join risk_month_end_exposure_snapshot c on c.batch_id=#{currentBatchId} and c.exposure_no=b.exposure_no
+        where b.batch_id=#{baseBatchId} and c.id is null
+    </insert>
+
+    <select id="getPortfolioComparison" resultType="map">
+        select c.customer_count current_customer_count,b.customer_count base_customer_count,c.customer_count-b.customer_count customer_delta,
+               c.exposure_count current_exposure_count,b.exposure_count base_exposure_count,c.exposure_count-b.exposure_count exposure_delta,
+               c.high_risk_count current_high_risk_count,b.high_risk_count base_high_risk_count,c.high_risk_count-b.high_risk_count high_risk_delta,
+               c.overdue_count current_overdue_count,b.overdue_count base_overdue_count,c.overdue_count-b.overdue_count overdue_delta,
+               c.default_count current_default_count,b.default_count base_default_count,c.default_count-b.default_count default_delta,
+               c.ead_amount current_ead,b.ead_amount base_ead,c.ead_amount-b.ead_amount ead_delta,
+               case when b.ead_amount&gt;0 then round((c.ead_amount-b.ead_amount)/b.ead_amount,6) else 0 end ead_change_rate,
+               c.weighted_pd current_pd,b.weighted_pd base_pd,c.weighted_pd-b.weighted_pd pd_delta,
+               c.weighted_lgd_avg current_lgd_avg,b.weighted_lgd_avg base_lgd_avg,c.weighted_lgd_avg-b.weighted_lgd_avg lgd_avg_delta,
+               c.weighted_lgd_downturn current_lgd_downturn,b.weighted_lgd_downturn base_lgd_downturn,c.weighted_lgd_downturn-b.weighted_lgd_downturn lgd_downturn_delta,
+               c.el_avg_amount current_el_avg,b.el_avg_amount base_el_avg,c.el_avg_amount-b.el_avg_amount el_avg_delta,
+               c.el_downturn_amount current_el_downturn,b.el_downturn_amount base_el_downturn,c.el_downturn_amount-b.el_downturn_amount el_downturn_delta
+        from risk_month_end_summary c
+        join risk_month_end_summary b on b.batch_id=#{baseBatchId} and b.dimension_type='PORTFOLIO' and b.dimension_code='ALL'
+        where c.batch_id=#{currentBatchId} and c.dimension_type='PORTFOLIO' and c.dimension_code='ALL'
+    </select>
+
+    <select id="listMonthlyTrend" resultType="map">
+        select date_format(s.month_end_date,'%Y-%m-%d') month_end_date,s.customer_count,s.exposure_count,s.high_risk_count,s.overdue_count,s.default_count,
+               s.ead_amount,s.weighted_pd,s.weighted_lgd_downturn,s.el_downturn_amount
+        from risk_month_end_summary s join risk_month_end_batch b on b.id=s.batch_id and b.published_flag=1
+        where s.dimension_type='PORTFOLIO' and s.dimension_code='ALL'
+        order by s.month_end_date desc limit #{limit}
+    </select>
+
+    <select id="listDimensionChanges" resultType="map">
+        select * from (
+          select c.dimension_code,c.dimension_name,c.customer_count current_customer_count,ifnull(b.customer_count,0) base_customer_count,
+                 c.customer_count-ifnull(b.customer_count,0) customer_delta,c.ead_amount current_ead,ifnull(b.ead_amount,0) base_ead,
+                 c.ead_amount-ifnull(b.ead_amount,0) ead_delta,c.concentration_ratio current_concentration,ifnull(b.concentration_ratio,0) base_concentration,
+                 c.concentration_ratio-ifnull(b.concentration_ratio,0) concentration_delta,c.weighted_pd current_pd,ifnull(b.weighted_pd,0) base_pd,
+                 c.weighted_pd-ifnull(b.weighted_pd,0) pd_delta,c.weighted_lgd_downturn current_lgd,ifnull(b.weighted_lgd_downturn,0) base_lgd,
+                 c.weighted_lgd_downturn-ifnull(b.weighted_lgd_downturn,0) lgd_delta,c.el_downturn_amount current_el,ifnull(b.el_downturn_amount,0) base_el,
+                 c.el_downturn_amount-ifnull(b.el_downturn_amount,0) el_delta
+          from risk_month_end_summary c
+          left join risk_month_end_summary b on b.batch_id=#{baseBatchId} and b.dimension_type=#{dimensionType} and b.dimension_code=c.dimension_code
+          where c.batch_id=#{currentBatchId} and c.dimension_type=#{dimensionType}
+          union all
+          select b.dimension_code,b.dimension_name,0,b.customer_count,-b.customer_count,0,b.ead_amount,-b.ead_amount,0,b.concentration_ratio,-b.concentration_ratio,
+                 0,b.weighted_pd,-b.weighted_pd,0,b.weighted_lgd_downturn,-b.weighted_lgd_downturn,0,b.el_downturn_amount,-b.el_downturn_amount
+          from risk_month_end_summary b
+          left join risk_month_end_summary c on c.batch_id=#{currentBatchId} and c.dimension_type=#{dimensionType} and c.dimension_code=b.dimension_code
+          where b.batch_id=#{baseBatchId} and b.dimension_type=#{dimensionType} and c.id is null
+        ) x order by abs(ead_delta) desc
+    </select>
+
+    <select id="listRiskMigration" resultType="map">
+        select b.risk_level previous_level,c.risk_level current_level,count(*) customer_count,sum(c.ead_amount) current_ead
+        from risk_month_end_customer_snapshot c
+        join risk_month_end_customer_snapshot b on b.batch_id=#{baseBatchId} and b.customer_no=c.customer_no
+        where c.batch_id=#{currentBatchId}
+        group by b.risk_level,c.risk_level order by b.risk_level,c.risk_level
+    </select>
+
+    <select id="listRatingMigration" resultType="map">
+        select ifnull(b.rating_result,'未评级') previous_level,ifnull(c.rating_result,'未评级') current_level,count(*) customer_count,sum(c.ead_amount) current_ead
+        from risk_month_end_customer_snapshot c
+        join risk_month_end_customer_snapshot b on b.batch_id=#{baseBatchId} and b.customer_no=c.customer_no
+        where c.batch_id=#{currentBatchId}
+        group by ifnull(b.rating_result,'未评级'),ifnull(c.rating_result,'未评级')
+        order by cast(previous_level as unsigned),cast(current_level as unsigned)
+    </select>
+
+    <select id="listChangeReasonSummary" resultType="map">
+        select change_type,count(*) item_count,count(distinct customer_no) customer_count,sum(ead_delta) ead_delta,sum(el_delta) el_delta
+        from risk_month_end_change_detail
+        where current_batch_id=#{currentBatchId} and base_batch_id=#{baseBatchId}
+        group by change_type order by abs(sum(ead_delta)) desc
+    </select>
+
+    <select id="listChangeDetails" resultType="map">
+        select * from risk_month_end_change_detail
+        where current_batch_id=#{currentBatchId} and base_batch_id=#{baseBatchId}
+        order by abs(ead_delta)+abs(el_delta) desc,id desc limit #{limit}
+    </select>
+
+    <select id="getOverdueDefaultComparison" resultType="map">
+        select c.overdue_customer_count current_overdue_customer_count,b.overdue_customer_count base_overdue_customer_count,
+               c.overdue_customer_count-b.overdue_customer_count overdue_customer_delta,
+               c.overdue_debt_count current_overdue_debt_count,b.overdue_debt_count base_overdue_debt_count,c.overdue_debt_count-b.overdue_debt_count overdue_debt_delta,
+               c.default_customer_count current_default_customer_count,b.default_customer_count base_default_customer_count,
+               c.default_customer_count-b.default_customer_count default_customer_delta,
+               c.default_debt_count current_default_debt_count,b.default_debt_count base_default_debt_count,c.default_debt_count-b.default_debt_count default_debt_delta,
+               c.max_overdue_days current_max_overdue_days,b.max_overdue_days base_max_overdue_days
+        from
+          (select sum(overdue_count&gt;0) overdue_customer_count,sum(overdue_count) overdue_debt_count,sum(default_flag=1) default_customer_count,
+                  sum(default_debt_count) default_debt_count,max(max_overdue_days) max_overdue_days
+           from risk_month_end_customer_snapshot where batch_id=#{currentBatchId}) c
+        cross join
+          (select sum(overdue_count&gt;0) overdue_customer_count,sum(overdue_count) overdue_debt_count,sum(default_flag=1) default_customer_count,
+                  sum(default_debt_count) default_debt_count,max(max_overdue_days) max_overdue_days
+           from risk_month_end_customer_snapshot where batch_id=#{baseBatchId}) b
+    </select>
+
+    <select id="listReconciliation" resultType="map">
+        select check_code,check_name,source_value,snapshot_value,difference_value,tolerance_value,check_status,detail_message,created_at
+        from risk_month_end_reconciliation where batch_id=#{batchId} order by id
+    </select>
+
+    <select id="listSourceManifest" resultType="map">
+        select * from risk_month_end_source_manifest where batch_id=#{batchId} order by id
+    </select>
+
+    <insert id="insertQualityIssue" parameterType="map">
+        insert into risk_month_end_quality_issue
+        (batch_id,check_code,issue_level,issue_type,issue_count,issue_description,owner_org,status)
+        values (#{batch_id},#{check_code},#{issue_level},#{issue_type},#{issue_count},#{issue_description},#{owner_org},'OPEN')
+        on duplicate key update issue_count=values(issue_count),issue_description=values(issue_description),updated_at=current_timestamp
+    </insert>
+
+    <select id="listQualityIssues" resultType="map">
+        select * from risk_month_end_quality_issue where batch_id=#{batchId} order by field(status,'OPEN','PROCESSING','RESOLVED'),field(issue_level,'HIGH','MEDIUM','LOW'),id
+    </select>
+
+    <select id="getQualityOverview" resultType="map">
+        select count(*) total_count,sum(status='OPEN') open_count,sum(status='PROCESSING') processing_count,
+               sum(status='RESOLVED') resolved_count,sum(issue_level='HIGH' and status!='RESOLVED') high_open_count
+        from risk_month_end_quality_issue where batch_id=#{batchId}
+    </select>
+
+    <update id="updateQualityIssue" parameterType="map">
+        update risk_month_end_quality_issue set status=#{status},resolution_note=#{resolution_note},owner_name=#{owner_name},
+          resolved_by=case when #{status}='RESOLVED' then #{operator} else resolved_by end,
+          resolved_at=case when #{status}='RESOLVED' then current_timestamp else null end
+        where id=#{id}
+    </update>
+
+    <select id="listChangeDrilldown" resultType="map">
+        select
+        <choose>
+            <when test="level == 'INDUSTRY'">industry_name node_key,industry_name node_name,'INDUSTRY' node_level,</when>
+            <when test="level == 'CUSTOMER'">customer_no node_key,max(customer_name) node_name,'CUSTOMER' node_level,</when>
+            <when test="level == 'CONTRACT'">contract_no node_key,contract_no node_name,'CONTRACT' node_level,</when>
+            <otherwise>debt_no node_key,debt_no node_name,'DEBT' node_level,</otherwise>
+        </choose>
+        count(*) item_count,count(distinct customer_no) customer_count,sum(previous_ead) previous_ead,sum(current_ead) current_ead,
+        sum(ead_delta) ead_delta,sum(el_delta) el_delta,sum(current_default_flag) default_count,max(change_type) main_change_type
+        from risk_month_end_change_detail
+        where current_batch_id=#{currentBatchId} and base_batch_id=#{baseBatchId}
+        <if test="industry != null and industry != ''">and industry_name=#{industry}</if>
+        <if test="customerNo != null and customerNo != ''">and customer_no=#{customerNo}</if>
+        <if test="contractNo != null and contractNo != ''">and contract_no=#{contractNo}</if>
+        <if test="changeType != null and changeType != ''">and change_type=#{changeType}</if>
+        <choose>
+            <when test="level == 'INDUSTRY'">group by industry_name</when>
+            <when test="level == 'CUSTOMER'">group by customer_no</when>
+            <when test="level == 'CONTRACT'">group by contract_no</when>
+            <otherwise>group by debt_no</otherwise>
+        </choose>
+        order by abs(sum(ead_delta))+abs(sum(el_delta)) desc limit #{limit}
+    </select>
+</mapper>

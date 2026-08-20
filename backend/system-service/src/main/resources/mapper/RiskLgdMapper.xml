@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.RiskLgdMapper">
+
+    <sql id="lgdLedgerBase">
+        select
+            e.exposure_no, e.customer_no, e.customer_name_snapshot as customer_name, e.contract_no, e.debt_no, e.drawdown_no,
+            e.product_type, e.ead_amount, e.exposure_balance, e.collateral_value, e.guaranteed_amount,
+            e.lgd_avg, e.lgd_downturn, e.pd, e.el_avg, e.el_downturn, e.product_recovery_rate,
+            e.rating_result, e.five_category, e.risk_level, e.overdue_days, e.default_flag,
+            e.measurement_date, e.data_date, e.model_name, e.model_version, e.scenario_type,
+            ifnull(c.industry_name, '未分类') as industry_name, ifnull(c.owner_org_name, '') as owner_org_name,
+            round(e.lgd_downturn - e.lgd_avg, 6) as lgd_gap,
+            case when e.ead_amount > 0 then round((e.collateral_value + e.guaranteed_amount) / e.ead_amount, 6) else null end as coverage_rate,
+            round(e.ead_amount * e.lgd_downturn, 2) as downturn_loss_exposure
+        from corporate_risk_exposure e
+        left join corporate_customer c on c.customer_no = e.customer_no and c.deleted_flag = 0
+        where e.deleted_flag = 0 and e.exposure_status = 'ACTIVE'
+    </sql>
+
+    <select id="getLgdOverviewSummary" resultType="map">
+        select
+            count(*) as exposure_count,
+            count(distinct customer_no) as customer_count,
+            ifnull(sum(ead_amount), 0) as ead_amount_total,
+            case when sum(ead_amount) > 0 then round(sum(ead_amount * lgd_avg) / sum(ead_amount), 6) else 0 end as weighted_lgd_avg,
+            case when sum(ead_amount) > 0 then round(sum(ead_amount * lgd_downturn) / sum(ead_amount), 6) else 0 end as weighted_lgd_downturn,
+            case when sum(ead_amount) > 0 then round(sum(ead_amount * product_recovery_rate) / sum(ead_amount), 6) else 0 end as weighted_recovery_rate,
+            ifnull(sum(el_avg), 0) as el_avg_amount,
+            ifnull(sum(el_downturn), 0) as el_downturn_amount,
+            ifnull(sum(case when lgd_downturn >= 0.600000 then ead_amount else 0 end), 0) as high_lgd_ead_amount,
+            ifnull(sum(lgd_downturn >= 0.600000), 0) as high_lgd_exposure_count,
+            ifnull(sum(product_recovery_rate &lt; 0.400000), 0) as low_recovery_exposure_count,
+            ifnull(sum(default_flag = 1), 0) as default_exposure_count,
+            max(data_date) as latest_data_date
+        from corporate_risk_exposure
+        where deleted_flag = 0 and exposure_status = 'ACTIVE'
+    </select>
+
+    <select id="listProductDistribution" resultType="map">
+        select product_type, count(*) as exposure_count, ifnull(sum(ead_amount), 0) as ead_amount,
+               case when sum(ead_amount) > 0 then round(sum(ead_amount * lgd_avg) / sum(ead_amount), 6) else 0 end as weighted_lgd_avg,
+               case when sum(ead_amount) > 0 then round(sum(ead_amount * lgd_downturn) / sum(ead_amount), 6) else 0 end as weighted_lgd_downturn,
+               case when sum(ead_amount) > 0 then round(sum(ead_amount * product_recovery_rate) / sum(ead_amount), 6) else 0 end as weighted_recovery_rate,
+               ifnull(sum(el_avg), 0) as el_avg_amount, ifnull(sum(el_downturn), 0) as el_downturn_amount
+        from corporate_risk_exposure
+        where deleted_flag = 0 and exposure_status = 'ACTIVE'
+        group by product_type
+        order by ead_amount desc, product_type
+    </select>
+
+    <select id="listIndustryDistribution" resultType="map">
+        select ifnull(c.industry_name, '未分类') as industry_name, count(*) as exposure_count,
+               count(distinct e.customer_no) as customer_count, ifnull(sum(e.ead_amount), 0) as ead_amount,
+               case when sum(e.ead_amount) > 0 then round(sum(e.ead_amount * e.lgd_avg) / sum(e.ead_amount), 6) else 0 end as weighted_lgd_avg,
+               case when sum(e.ead_amount) > 0 then round(sum(e.ead_amount * e.lgd_downturn) / sum(e.ead_amount), 6) else 0 end as weighted_lgd_downturn,
+               ifnull(sum(e.el_downturn), 0) as el_downturn_amount
+        from corporate_risk_exposure e
+        left join corporate_customer c on c.customer_no = e.customer_no and c.deleted_flag = 0
+        where e.deleted_flag = 0 and e.exposure_status = 'ACTIVE'
+        group by ifnull(c.industry_name, '未分类')
+        order by ead_amount desc, weighted_lgd_downturn desc
+    </select>
+
+    <select id="listHighLgdExposures" resultType="map">
+        select * from (
+            <include refid="lgdLedgerBase"/>
+        ) ledger
+        order by downturn_loss_exposure desc, lgd_downturn desc, ead_amount desc
+        limit #{limit}
+    </select>
+
+    <sql id="ledgerFilters">
+        <if test="filters.keyword != null and filters.keyword != ''">
+            and (e.customer_no like concat('%', #{filters.keyword}, '%')
+                 or e.customer_name_snapshot like concat('%', #{filters.keyword}, '%')
+                 or e.contract_no like concat('%', #{filters.keyword}, '%')
+                 or e.debt_no like concat('%', #{filters.keyword}, '%'))
+        </if>
+        <if test="filters.customerNo != null and filters.customerNo != ''">and e.customer_no = #{filters.customerNo}</if>
+        <if test="filters.productType != null and filters.productType != ''">and e.product_type = #{filters.productType}</if>
+        <if test="filters.industryName != null and filters.industryName != ''">and c.industry_name = #{filters.industryName}</if>
+        <if test="filters.ratingResult != null and filters.ratingResult != ''">and e.rating_result = #{filters.ratingResult}</if>
+        <if test="filters.minLgdDownturn != null and filters.minLgdDownturn != ''">and e.lgd_downturn >= #{filters.minLgdDownturn}</if>
+        <if test="filters.defaultFlag != null and filters.defaultFlag != ''">and e.default_flag = #{filters.defaultFlag}</if>
+    </sql>
+
+    <select id="listLgdLedger" resultType="map">
+        select
+            e.exposure_no, e.customer_no, e.customer_name_snapshot as customer_name, e.contract_no, e.debt_no, e.drawdown_no,
+            e.product_type, e.ead_amount, e.exposure_balance, e.collateral_value, e.guaranteed_amount,
+            e.lgd_avg, e.lgd_downturn, e.pd, e.el_avg, e.el_downturn, e.product_recovery_rate,
+            e.rating_result, e.five_category, e.risk_level, e.overdue_days, e.default_flag,
+            e.measurement_date, e.data_date, e.model_name, e.model_version, e.scenario_type,
+            ifnull(c.industry_name, '未分类') as industry_name, ifnull(c.owner_org_name, '') as owner_org_name,
+            round(e.lgd_downturn - e.lgd_avg, 6) as lgd_gap,
+            case when e.ead_amount > 0 then round((e.collateral_value + e.guaranteed_amount) / e.ead_amount, 6) else null end as coverage_rate,
+            round(e.ead_amount * e.lgd_downturn, 2) as downturn_loss_exposure
+        from corporate_risk_exposure e
+        left join corporate_customer c on c.customer_no = e.customer_no and c.deleted_flag = 0
+        where e.deleted_flag = 0 and e.exposure_status = 'ACTIVE'
+        <include refid="ledgerFilters"/>
+        order by downturn_loss_exposure desc, e.debt_no
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countLgdLedger" resultType="long">
+        select count(*)
+        from corporate_risk_exposure e
+        left join corporate_customer c on c.customer_no = e.customer_no and c.deleted_flag = 0
+        where e.deleted_flag = 0 and e.exposure_status = 'ACTIVE'
+        <include refid="ledgerFilters"/>
+    </select>
+
+    <select id="listAllLgdLedger" resultType="map">
+        select * from (<include refid="lgdLedgerBase"/>) ledger
+    </select>
+
+    <select id="getDebtLgdDetail" resultType="map">
+        select * from (<include refid="lgdLedgerBase"/>) ledger
+        where debt_no = #{debtNo}
+        order by data_date desc
+        limit 1
+    </select>
+
+    <select id="listDebtCollaterals" resultType="map">
+        select rel.contract_no, co.collateral_no, co.collateral_name, co.collateral_type, co.confirmed_value,
+               co.available_secured_amount, rel.secured_amount, rel.pledge_rate, rel.relation_status
+        from corporate_credit_drawdown d
+        join corporate_credit_contract_collateral rel on rel.contract_no = d.contract_no_snapshot and rel.deleted_flag = 0 and rel.relation_status = 'ACTIVE'
+        join corporate_credit_collateral co on co.collateral_no = rel.collateral_no and co.deleted_flag = 0
+        where d.debt_no = #{debtNo} and d.deleted_flag = 0
+        order by co.confirmed_value desc
+    </select>
+
+    <select id="listDebtOverdues" resultType="map">
+        select overdue_no, overdue_date, overdue_days, total_overdue_amount, remaining_overdue_amount, repayment_status, collection_status
+        from corporate_credit_overdue
+        where debt_no = #{debtNo} and deleted_flag = 0
+        order by overdue_date desc, id desc
+        limit 20
+    </select>
+
+    <select id="listDebtDefaults" resultType="map">
+        select debt_default_no, default_level, default_date, overdue_days, default_exposure_amount, loss_amount, default_status
+        from corporate_debt_default
+        where debt_no = #{debtNo} and deleted_flag = 0
+        order by default_date desc, id desc
+        limit 20
+    </select>
+
+    <select id="getCustomerLgdSummary" resultType="map">
+        select customer_no, max(customer_name_snapshot) as customer_name, count(*) as exposure_count,
+               ifnull(sum(ead_amount), 0) as ead_amount_total,
+               case when sum(ead_amount) > 0 then round(sum(ead_amount * lgd_avg) / sum(ead_amount), 6) else 0 end as weighted_lgd_avg,
+               case when sum(ead_amount) > 0 then round(sum(ead_amount * lgd_downturn) / sum(ead_amount), 6) else 0 end as weighted_lgd_downturn,
+               case when sum(ead_amount) > 0 then round(sum(ead_amount * product_recovery_rate) / sum(ead_amount), 6) else 0 end as weighted_recovery_rate,
+               ifnull(sum(el_avg), 0) as el_avg_amount, ifnull(sum(el_downturn), 0) as el_downturn_amount,
+               max(overdue_days) as max_overdue_days, ifnull(sum(default_flag = 1), 0) as default_exposure_count
+        from corporate_risk_exposure
+        where customer_no = #{customerNo} and deleted_flag = 0 and exposure_status = 'ACTIVE'
+        group by customer_no
+    </select>
+
+    <select id="listCustomerLgdExposures" resultType="map">
+        select * from (<include refid="lgdLedgerBase"/>) ledger
+        where customer_no = #{customerNo}
+        order by downturn_loss_exposure desc
+    </select>
+
+    <select id="getLatestLgdDataDate" resultType="string">
+        select date_format(max(data_date), '%Y-%m-%d')
+        from corporate_risk_exposure
+        where deleted_flag = 0 and exposure_status = 'ACTIVE'
+    </select>
+
+    <select id="getPublishedLgdModelVersion" resultType="map">
+        select id, version_code, version_name, status, source_description, created_by, approved_by, approved_at, effective_date, created_at, updated_at
+        from risk_lgd_model_version
+        where status = 'PUBLISHED'
+        order by effective_date desc, id desc
+        limit 1
+    </select>
+
+    <select id="listLgdModelVersions" resultType="map">
+        select id, version_code, version_name, status, source_description, created_by, approved_by, approved_at, effective_date, created_at, updated_at
+        from risk_lgd_model_version
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="listLgdSegmentParameters" resultType="map">
+        select id, version_id, segment_type, segment_code, segment_name, lgd_avg, lgd_downturn, recovery_rate, collateral_haircut, enabled, created_at, updated_at
+        from risk_lgd_segment_parameter
+        where version_id = #{versionId}
+        order by segment_type, segment_code
+    </select>
+
+    <insert id="insertLgdModelVersion" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_lgd_model_version
+          (version_code, version_name, status, source_description, created_by, approved_by, approved_at, effective_date)
+        values
+          (#{version_code}, #{version_name}, #{status}, #{source_description}, #{created_by}, #{approved_by}, #{approved_at}, #{effective_date})
+    </insert>
+
+    <insert id="insertLgdSegmentParameter" parameterType="map">
+        insert into risk_lgd_segment_parameter
+          (version_id, segment_type, segment_code, segment_name, lgd_avg, lgd_downturn, recovery_rate, collateral_haircut, enabled)
+        values
+          (#{version_id}, #{segment_type}, #{segment_code}, #{segment_name}, #{lgd_avg}, #{lgd_downturn}, #{recovery_rate}, #{collateral_haircut}, #{enabled})
+    </insert>
+
+    <insert id="insertLgdCalculationRun" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_lgd_calculation_run
+          (model_version_id, run_type, source_data_date, exposure_count, ead_amount, weighted_lgd_avg, weighted_lgd_downturn, el_avg_amount, el_downturn_amount, result_summary, run_by)
+        values
+          (#{model_version_id}, #{run_type}, #{source_data_date}, #{exposure_count}, #{ead_amount}, #{weighted_lgd_avg}, #{weighted_lgd_downturn}, #{el_avg_amount}, #{el_downturn_amount}, #{result_summary}, #{run_by})
+    </insert>
+
+    <select id="listLgdCalculationRuns" resultType="map">
+        select r.id, r.run_type, r.source_data_date, r.exposure_count, r.ead_amount, r.weighted_lgd_avg, r.weighted_lgd_downturn,
+               r.el_avg_amount, r.el_downturn_amount, r.result_summary, r.run_by, r.created_at, v.version_code, v.version_name
+        from risk_lgd_calculation_run r
+        left join risk_lgd_model_version v on v.id = r.model_version_id
+        order by r.id desc
+        limit #{limit}
+    </select>
+
+    <insert id="insertLgdStressTestRun" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_lgd_stress_test_run (scenario_code, scenario_name, parameter_json, summary_json, run_by)
+        values (#{scenario_code}, #{scenario_name}, #{parameter_json}, #{summary_json}, #{run_by})
+    </insert>
+
+    <select id="listLgdStressTestRuns" resultType="map">
+        select id, scenario_code, scenario_name, parameter_json, summary_json, run_by, created_at
+        from risk_lgd_stress_test_run
+        order by id desc
+        limit #{limit}
+    </select>
+</mapper>

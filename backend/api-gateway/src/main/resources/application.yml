@@ -1,0 +1,13 @@
+app:
+  id: ${APP_ID:api-gateway}
+
+# Routes, CORS, Redis, JWT, session, Eureka and management settings are loaded
+# from Apollo. Only Apollo bootstrap values remain local.
+apollo:
+  meta: ${APOLLO_META:http://localhost:8080}
+  required: ${APOLLO_REQUIRED:true}
+  bootstrap:
+    enabled: ${APOLLO_ENABLED:true}
+    eagerLoad:
+      enabled: true
+    namespaces: ${APOLLO_NAMESPACES:application,gateway,security}

@@ -1,0 +1,18 @@
+mybatis:
+  mapper-locations: classpath*:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: false
+
+app:
+  id: ${APP_ID:user-service}
+
+# Datasource, Redis, JWT, internal-service authentication, Eureka and
+# management settings are loaded from Apollo.
+apollo:
+  meta: ${APOLLO_META:http://localhost:8080}
+  required: ${APOLLO_REQUIRED:true}
+  bootstrap:
+    enabled: ${APOLLO_ENABLED:true}
+    eagerLoad:
+      enabled: true
+    namespaces: ${APOLLO_NAMESPACES:application,database,security}

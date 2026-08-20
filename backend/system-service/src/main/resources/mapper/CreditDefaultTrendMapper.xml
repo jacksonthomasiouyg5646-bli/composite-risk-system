@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.CreditDefaultTrendMapper">
+
+    <sql id="debtDefaultKeywordFilter">
+        <if test="keyword != null and keyword != ''">
+            and (
+                debt_default_no like concat('%', #{keyword}, '%')
+                or customer_no like concat('%', #{keyword}, '%')
+                or customer_name_snapshot like concat('%', #{keyword}, '%')
+                or contract_no like concat('%', #{keyword}, '%')
+                or debt_no like concat('%', #{keyword}, '%')
+                or ifnull(drawdown_no, '') like concat('%', #{keyword}, '%')
+                or ifnull(exposure_no, '') like concat('%', #{keyword}, '%')
+                or product_type like concat('%', #{keyword}, '%')
+                or ifnull(manager_name, '') like concat('%', #{keyword}, '%')
+                or ifnull(owner_org_name, '') like concat('%', #{keyword}, '%')
+            )
+        </if>
+    </sql>
+
+    <sql id="customerDefaultKeywordFilter">
+        <if test="keyword != null and keyword != ''">
+            and (
+                customer_default_no like concat('%', #{keyword}, '%')
+                or customer_no like concat('%', #{keyword}, '%')
+                or customer_name_snapshot like concat('%', #{keyword}, '%')
+                or ifnull(manager_name, '') like concat('%', #{keyword}, '%')
+                or ifnull(owner_org_name, '') like concat('%', #{keyword}, '%')
+            )
+        </if>
+    </sql>
+
+    <sql id="overdueKeywordFilter">
+        <if test="keyword != null and keyword != ''">
+            and (
+                o.overdue_no like concat('%', #{keyword}, '%')
+                or o.customer_no like concat('%', #{keyword}, '%')
+                or o.customer_name_snapshot like concat('%', #{keyword}, '%')
+                or o.contract_no like concat('%', #{keyword}, '%')
+                or o.debt_no like concat('%', #{keyword}, '%')
+                or ifnull(o.drawdown_no, '') like concat('%', #{keyword}, '%')
+                or o.product_type like concat('%', #{keyword}, '%')
+                or ifnull(o.manager_name, '') like concat('%', #{keyword}, '%')
+                or ifnull(o.owner_org_name, '') like concat('%', #{keyword}, '%')
+            )
+        </if>
+    </sql>
+
+    <select id="findMaxStatDate" resultType="string">
+        select date_format(max(stat_date), '%Y-%m-%d')
+        from (
+            select max(default_date) as stat_date
+            from corporate_debt_default
+            where deleted_flag = 0
+            union all
+            select max(latest_default_date) as stat_date
+            from corporate_customer_default
+            where deleted_flag = 0
+            union all
+            select max(overdue_date) as stat_date
+            from corporate_credit_overdue
+            where deleted_flag = 0
+        ) dates
+    </select>
+
+    <select id="listDebtDefaultDaily" resultType="map">
+        select
+            date_format(default_date, '%Y-%m-%d') as stat_date,
+            count(*) as debt_default_count,
+            ifnull(sum(default_exposure_amount), 0) as default_exposure_amount
+        from corporate_debt_default
+        where deleted_flag = 0
+          and default_date between #{startDate} and #{endDate}
+        <if test="defaultLevel != null and defaultLevel != ''">
+          and default_level = #{defaultLevel}
+        </if>
+        <include refid="debtDefaultKeywordFilter"/>
+        group by default_date
+        order by default_date
+    </select>
+
+    <select id="listCustomerDefaultDaily" resultType="map">
+        select
+            date_format(latest_default_date, '%Y-%m-%d') as stat_date,
+            count(*) as customer_default_count
+        from corporate_customer_default
+        where deleted_flag = 0
+          and latest_default_date between #{startDate} and #{endDate}
+        <if test="defaultLevel != null and defaultLevel != ''">
+          and highest_default_level = #{defaultLevel}
+        </if>
+        <include refid="customerDefaultKeywordFilter"/>
+        group by latest_default_date
+        order by latest_default_date
+    </select>
+
+    <select id="listOverdueDaily" resultType="map">
+        select
+            date_format(o.overdue_date, '%Y-%m-%d') as stat_date,
+            count(*) as overdue_count,
+            max(o.overdue_days) as max_overdue_days,
+            ifnull(sum(o.total_overdue_amount), 0) as overdue_amount
+        from corporate_credit_overdue o
+        where o.deleted_flag = 0
+          and o.overdue_date between #{startDate} and #{endDate}
+        <if test="defaultLevel != null and defaultLevel != ''">
+          and exists (
+              select 1
+              from corporate_debt_default d
+              where d.debt_no = o.debt_no
+                and d.deleted_flag = 0
+                and d.default_level = #{defaultLevel}
+          )
+        </if>
+        <include refid="overdueKeywordFilter"/>
+        group by o.overdue_date
+        order by o.overdue_date
+    </select>
+
+    <select id="listDefaultLevelDistribution" resultType="map">
+        select
+            default_level,
+            count(*) as debt_default_count,
+            ifnull(sum(default_exposure_amount), 0) as default_exposure_amount,
+            ifnull(sum(loss_amount), 0) as loss_amount
+        from corporate_debt_default
+        where deleted_flag = 0
+          and default_date between #{startDate} and #{endDate}
+        <if test="defaultLevel != null and defaultLevel != ''">
+          and default_level = #{defaultLevel}
+        </if>
+        <include refid="debtDefaultKeywordFilter"/>
+        group by default_level
+        order by case default_level when 'A' then 1 when 'B' then 2 when 'C' then 3 else 9 end
+    </select>
+
+    <select id="listRecentDefaults" resultType="map">
+        select
+            debt_default_no,
+            date_format(default_date, '%Y-%m-%d') as default_date,
+            customer_no,
+            customer_name_snapshot,
+            contract_no,
+            debt_no,
+            default_level,
+            overdue_days,
+            ifnull(five_category, '') as five_category,
+            ifnull(rating_result, '') as rating_result,
+            default_exposure_amount,
+            loss_amount,
+            ifnull(default_reason, '') as default_reason,
+            default_status
+        from corporate_debt_default
+        where deleted_flag = 0
+          and default_date between #{startDate} and #{endDate}
+        <if test="defaultLevel != null and defaultLevel != ''">
+          and default_level = #{defaultLevel}
+        </if>
+        <include refid="debtDefaultKeywordFilter"/>
+        order by default_date desc, id desc
+        limit #{limit}
+    </select>
+</mapper>

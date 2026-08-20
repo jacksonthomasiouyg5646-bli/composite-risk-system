@@ -1,0 +1,787 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.CreditDomainQueryMapper">
+
+    <sql id="customerViewFrom">
+        from corporate_customer c
+        left join corporate_rating r on r.active_customer_no = c.customer_no
+        left join corporate_credit_limit l on l.active_customer_no = c.customer_no
+        left join (
+            select customer_no_snapshot as customer_no,
+                   count(*) as application_count,
+                   sum(apply_amount) as application_amount_total
+            from corporate_credit_application
+            where deleted_flag = 0
+            group by customer_no_snapshot
+        ) app on app.customer_no = c.customer_no
+        left join (
+            select customer_no_snapshot as customer_no,
+                   count(*) as contract_count,
+                   sum(contract_amount) as contract_amount_total
+            from corporate_credit_contract
+            where deleted_flag = 0
+            group by customer_no_snapshot
+        ) ct on ct.customer_no = c.customer_no
+        left join (
+            select customer_no_snapshot as customer_no,
+                   count(*) as drawdown_count,
+                   sum(actual_draw_amount) as actual_draw_amount_total,
+                   sum(outstanding_principal_amount) as outstanding_principal_amount_total
+            from corporate_credit_drawdown
+            where deleted_flag = 0
+            group by customer_no_snapshot
+        ) dr on dr.customer_no = c.customer_no
+        left join (
+            select customer_no,
+                   count(*) as collateral_count,
+                   sum(confirmed_value) as confirmed_value_total
+            from corporate_credit_collateral
+            where deleted_flag = 0
+            group by customer_no
+        ) co on co.customer_no = c.customer_no
+        left join (
+            select customer_no,
+                   count(*) as contract_collateral_count,
+                   sum(secured_amount) as total_secured_amount
+            from corporate_credit_contract_collateral
+            where deleted_flag = 0
+              and relation_status = 'ACTIVE'
+            group by customer_no
+        ) rel on rel.customer_no = c.customer_no
+        left join (
+            select customer_no,
+                   count(*) as exposure_count,
+                   sum(ead_amount) as ead_amount_total,
+                   sum(el_avg) as el_avg_total,
+                   max(pd) as max_pd
+            from corporate_risk_exposure
+            where deleted_flag = 0
+            group by customer_no
+        ) ex on ex.customer_no = c.customer_no
+        left join (
+            select customer_no,
+                   count(*) as overdue_count,
+                   max(overdue_days) as max_overdue_days,
+                   sum(total_overdue_amount) as overdue_amount_total
+            from corporate_credit_overdue
+            where deleted_flag = 0
+            group by customer_no
+        ) ov on ov.customer_no = c.customer_no
+        left join (
+            select customer_no,
+                   count(*) as debt_default_count,
+                   sum(default_exposure_amount) as default_exposure_amount_total,
+                   min(case default_level when 'A' then 1 when 'B' then 2 when 'C' then 3 else 9 end) as highest_default_rank
+            from corporate_debt_default
+            where deleted_flag = 0
+            group by customer_no
+        ) dd on dd.customer_no = c.customer_no
+        left join corporate_customer_default cd on cd.active_customer_no = c.customer_no
+        where c.deleted_flag = 0
+        <if test="criteria.keyword != null and criteria.keyword != ''">
+            and (
+                c.customer_no like concat('%', #{criteria.keyword}, '%')
+                or c.customer_name like concat('%', #{criteria.keyword}, '%')
+                or ifnull(c.unified_social_credit_code, '') like concat('%', #{criteria.keyword}, '%')
+                or ifnull(r.rating_no, '') like concat('%', #{criteria.keyword}, '%')
+                or ifnull(l.limit_no, '') like concat('%', #{criteria.keyword}, '%')
+            )
+        </if>
+        <if test="criteria.customerNo != null and criteria.customerNo != ''">
+            and c.customer_no like concat('%', #{criteria.customerNo}, '%')
+        </if>
+        <if test="criteria.ratingLevel != null and criteria.ratingLevel != ''">
+            and r.rating_level = #{criteria.ratingLevel}
+        </if>
+        <if test="criteria.riskLevel != null and criteria.riskLevel != ''">
+            and (c.risk_level = #{criteria.riskLevel} or ifnull(l.risk_level, '') = #{criteria.riskLevel})
+        </if>
+        <if test="criteria.productType != null and criteria.productType != ''">
+            and (
+                exists (select 1 from corporate_credit_application x where x.customer_no_snapshot = c.customer_no and x.deleted_flag = 0 and x.product_type like concat('%', #{criteria.productType}, '%'))
+                or exists (select 1 from corporate_credit_contract x where x.customer_no_snapshot = c.customer_no and x.deleted_flag = 0 and x.product_type like concat('%', #{criteria.productType}, '%'))
+                or exists (select 1 from corporate_credit_drawdown x where x.customer_no_snapshot = c.customer_no and x.deleted_flag = 0 and x.product_type like concat('%', #{criteria.productType}, '%'))
+                or exists (select 1 from corporate_risk_exposure x where x.customer_no = c.customer_no and x.deleted_flag = 0 and x.product_type like concat('%', #{criteria.productType}, '%'))
+            )
+        </if>
+        <if test="criteria.status != null and criteria.status != ''">
+            and c.status = #{criteria.status}
+        </if>
+        <if test="criteria.defaultLevel != null and criteria.defaultLevel != ''">
+            and exists (
+                select 1
+                from corporate_debt_default x
+                where x.customer_no = c.customer_no
+                  and x.deleted_flag = 0
+                  and x.default_level = #{criteria.defaultLevel}
+            )
+        </if>
+        <if test="criteria.ownerOrgName != null and criteria.ownerOrgName != ''">
+            and (
+                ifnull(c.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+                or ifnull(l.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+            )
+        </if>
+        <if test="criteria.startDate != null">
+            and date(c.created_at) &gt;= #{criteria.startDate}
+        </if>
+        <if test="criteria.endDate != null">
+            and date(c.created_at) &lt;= #{criteria.endDate}
+        </if>
+    </sql>
+
+    <select id="listCustomerView" resultType="map">
+        select
+            c.id,
+            c.customer_no,
+            c.customer_name,
+            c.industry_name,
+            c.customer_type,
+            c.customer_level,
+            c.risk_level as customer_risk_level,
+            c.kyc_status,
+            c.blacklist_flag,
+            c.status as customer_status,
+            c.owner_org_name,
+            c.relationship_manager_name,
+            ifnull(r.rating_no, '') as rating_no,
+            r.rating_level,
+            r.rating_date,
+            ifnull(l.limit_no, '') as limit_no,
+            ifnull(l.total_limit_amount, 0) as total_limit_amount,
+            ifnull(l.available_limit_amount, 0) as available_limit_amount,
+            l.limit_status,
+            ifnull(app.application_count, 0) as application_count,
+            ifnull(app.application_amount_total, 0) as application_amount_total,
+            ifnull(ct.contract_count, 0) as contract_count,
+            ifnull(ct.contract_amount_total, 0) as contract_amount_total,
+            ifnull(dr.drawdown_count, 0) as drawdown_count,
+            ifnull(dr.actual_draw_amount_total, 0) as actual_draw_amount_total,
+            ifnull(dr.outstanding_principal_amount_total, 0) as outstanding_principal_amount_total,
+            ifnull(co.collateral_count, 0) as collateral_count,
+            ifnull(co.confirmed_value_total, 0) as confirmed_value_total,
+            ifnull(rel.contract_collateral_count, 0) as contract_collateral_count,
+            ifnull(rel.total_secured_amount, 0) as total_secured_amount,
+            ifnull(ex.exposure_count, 0) as exposure_count,
+            ifnull(ex.ead_amount_total, 0) as ead_amount_total,
+            ifnull(ex.el_avg_total, 0) as el_avg_total,
+            ex.max_pd,
+            ifnull(ov.overdue_count, 0) as overdue_count,
+            ifnull(ov.max_overdue_days, 0) as max_overdue_days,
+            ifnull(ov.overdue_amount_total, 0) as overdue_amount_total,
+            ifnull(dd.debt_default_count, 0) as debt_default_count,
+            ifnull(dd.default_exposure_amount_total, 0) as default_exposure_amount_total,
+            case dd.highest_default_rank when 1 then 'A' when 2 then 'B' when 3 then 'C' else '' end as highest_default_level,
+            ifnull(cd.customer_default_no, '') as customer_default_no,
+            ifnull(cd.default_status, '') as customer_default_status,
+            case
+                when ifnull(cd.default_status, '') = 'ACTIVE' or ifnull(dd.debt_default_count, 0) &gt; 0 then '违约'
+                when ifnull(ov.overdue_count, 0) &gt; 0 then '逾期'
+                else '正常'
+            end as risk_state
+        <include refid="customerViewFrom"/>
+        order by
+            case
+                when ifnull(cd.default_status, '') = 'ACTIVE' then 1
+                when ifnull(dd.debt_default_count, 0) &gt; 0 then 2
+                when ifnull(ov.overdue_count, 0) &gt; 0 then 3
+                else 4
+            end,
+            c.customer_no
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countCustomerView" resultType="long">
+        select count(*)
+        <include refid="customerViewFrom"/>
+    </select>
+
+    <sql id="limitViewFrom">
+        from corporate_credit_limit l
+        join corporate_customer c on c.customer_no = l.customer_no_snapshot
+        left join corporate_rating r on r.active_customer_no = c.customer_no
+        left join (
+            select related_limit_id as limit_id,
+                   count(*) as application_count,
+                   sum(apply_amount) as application_amount_total
+            from corporate_credit_application
+            where deleted_flag = 0
+            group by related_limit_id
+        ) app on app.limit_id = l.id
+        left join (
+            select limit_id,
+                   count(*) as contract_count,
+                   sum(contract_amount) as contract_amount_total,
+                   sum(available_draw_amount) as available_draw_amount_total
+            from corporate_credit_contract
+            where deleted_flag = 0
+            group by limit_id
+        ) ct on ct.limit_id = l.id
+        left join (
+            select limit_id,
+                   count(*) as drawdown_count,
+                   sum(actual_draw_amount) as actual_draw_amount_total,
+                   sum(outstanding_principal_amount) as outstanding_principal_amount_total
+            from corporate_credit_drawdown
+            where deleted_flag = 0
+            group by limit_id
+        ) dr on dr.limit_id = l.id
+        left join (
+            select dr.limit_id,
+                   count(ex.id) as exposure_count,
+                   sum(ex.ead_amount) as ead_amount_total,
+                   sum(ex.el_avg) as el_avg_total,
+                   max(ex.pd) as max_pd
+            from corporate_credit_drawdown dr
+            join corporate_risk_exposure ex on ex.drawdown_no = dr.drawdown_no and ex.deleted_flag = 0
+            where dr.deleted_flag = 0
+            group by dr.limit_id
+        ) ex on ex.limit_id = l.id
+        left join (
+            select dr.limit_id,
+                   count(ov.id) as overdue_count,
+                   max(ov.overdue_days) as max_overdue_days
+            from corporate_credit_drawdown dr
+            join corporate_credit_overdue ov on ov.debt_no = dr.debt_no and ov.deleted_flag = 0
+            where dr.deleted_flag = 0
+            group by dr.limit_id
+        ) ov on ov.limit_id = l.id
+        left join (
+            select dr.limit_id,
+                   count(dd.id) as debt_default_count,
+                   min(case dd.default_level when 'A' then 1 when 'B' then 2 when 'C' then 3 else 9 end) as highest_default_rank
+            from corporate_credit_drawdown dr
+            join corporate_debt_default dd on dd.debt_no = dr.debt_no and dd.deleted_flag = 0
+            where dr.deleted_flag = 0
+            group by dr.limit_id
+        ) dd on dd.limit_id = l.id
+        where l.deleted_flag = 0
+          and c.deleted_flag = 0
+        <if test="criteria.keyword != null and criteria.keyword != ''">
+            and (
+                l.limit_no like concat('%', #{criteria.keyword}, '%')
+                or c.customer_no like concat('%', #{criteria.keyword}, '%')
+                or c.customer_name like concat('%', #{criteria.keyword}, '%')
+                or ifnull(l.approval_no, '') like concat('%', #{criteria.keyword}, '%')
+            )
+        </if>
+        <if test="criteria.customerNo != null and criteria.customerNo != ''">
+            and c.customer_no like concat('%', #{criteria.customerNo}, '%')
+        </if>
+        <if test="criteria.ratingLevel != null and criteria.ratingLevel != ''">
+            and r.rating_level = #{criteria.ratingLevel}
+        </if>
+        <if test="criteria.riskLevel != null and criteria.riskLevel != ''">
+            and (l.risk_level = #{criteria.riskLevel} or c.risk_level = #{criteria.riskLevel})
+        </if>
+        <if test="criteria.productType != null and criteria.productType != ''">
+            and (
+                exists (select 1 from corporate_credit_application x where x.related_limit_id = l.id and x.deleted_flag = 0 and x.product_type like concat('%', #{criteria.productType}, '%'))
+                or exists (select 1 from corporate_credit_contract x where x.limit_id = l.id and x.deleted_flag = 0 and x.product_type like concat('%', #{criteria.productType}, '%'))
+                or exists (select 1 from corporate_credit_drawdown x where x.limit_id = l.id and x.deleted_flag = 0 and x.product_type like concat('%', #{criteria.productType}, '%'))
+            )
+        </if>
+        <if test="criteria.status != null and criteria.status != ''">
+            and l.limit_status = #{criteria.status}
+        </if>
+        <if test="criteria.defaultLevel != null and criteria.defaultLevel != ''">
+            and exists (
+                select 1
+                from corporate_credit_drawdown x
+                join corporate_debt_default y on y.debt_no = x.debt_no and y.deleted_flag = 0
+                where x.limit_id = l.id
+                  and x.deleted_flag = 0
+                  and y.default_level = #{criteria.defaultLevel}
+            )
+        </if>
+        <if test="criteria.ownerOrgName != null and criteria.ownerOrgName != ''">
+            and (
+                ifnull(l.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+                or ifnull(c.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+            )
+        </if>
+        <if test="criteria.startDate != null">
+            and l.effective_date &gt;= #{criteria.startDate}
+        </if>
+        <if test="criteria.endDate != null">
+            and l.effective_date &lt;= #{criteria.endDate}
+        </if>
+    </sql>
+
+    <select id="listLimitView" resultType="map">
+        select
+            l.id,
+            l.limit_no,
+            c.customer_no,
+            c.customer_name,
+            r.rating_level,
+            l.limit_type,
+            l.currency,
+            l.total_limit_amount,
+            l.used_limit_amount,
+            l.frozen_limit_amount,
+            l.available_limit_amount,
+            l.effective_date,
+            l.expiry_date,
+            l.credit_rating_level,
+            l.risk_level,
+            l.limit_status,
+            l.owner_org_name,
+            l.manager_name,
+            ifnull(app.application_count, 0) as application_count,
+            ifnull(app.application_amount_total, 0) as application_amount_total,
+            ifnull(ct.contract_count, 0) as contract_count,
+            ifnull(ct.contract_amount_total, 0) as contract_amount_total,
+            ifnull(ct.available_draw_amount_total, 0) as available_draw_amount_total,
+            ifnull(dr.drawdown_count, 0) as drawdown_count,
+            ifnull(dr.actual_draw_amount_total, 0) as actual_draw_amount_total,
+            ifnull(dr.outstanding_principal_amount_total, 0) as outstanding_principal_amount_total,
+            ifnull(ex.exposure_count, 0) as exposure_count,
+            ifnull(ex.ead_amount_total, 0) as ead_amount_total,
+            ifnull(ex.el_avg_total, 0) as el_avg_total,
+            ex.max_pd,
+            ifnull(ov.overdue_count, 0) as overdue_count,
+            ifnull(ov.max_overdue_days, 0) as max_overdue_days,
+            ifnull(dd.debt_default_count, 0) as debt_default_count,
+            case dd.highest_default_rank when 1 then 'A' when 2 then 'B' when 3 then 'C' else '' end as highest_default_level
+        <include refid="limitViewFrom"/>
+        order by
+            case when l.limit_status = 'ACTIVE' then 1 else 2 end,
+            l.expiry_date,
+            l.limit_no
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countLimitView" resultType="long">
+        select count(*)
+        <include refid="limitViewFrom"/>
+    </select>
+
+    <sql id="applicationContractViewFrom">
+        from corporate_credit_application app
+        join corporate_customer c on c.customer_no = app.customer_no_snapshot
+        left join corporate_rating r on r.active_customer_no = c.customer_no
+        left join corporate_credit_limit l on l.id = app.related_limit_id
+        left join corporate_credit_contract ct on ct.application_no_snapshot = app.application_no and ct.deleted_flag = 0
+        left join (
+            select application_id,
+                   count(*) as drawdown_count,
+                   sum(actual_draw_amount) as actual_draw_amount_total,
+                   sum(outstanding_principal_amount) as outstanding_principal_amount_total
+            from corporate_credit_drawdown
+            where deleted_flag = 0
+            group by application_id
+        ) dr on dr.application_id = app.id
+        left join (
+            select contract_no,
+                   count(*) as collateral_relation_count,
+                   sum(secured_amount) as total_secured_amount
+            from corporate_credit_contract_collateral
+            where deleted_flag = 0
+              and relation_status = 'ACTIVE'
+            group by contract_no
+        ) rel on rel.contract_no = ct.contract_no
+        left join (
+            select contract_no,
+                   count(*) as exposure_count,
+                   sum(ead_amount) as ead_amount_total,
+                   max(pd) as max_pd,
+                   sum(el_avg) as el_avg_total
+            from corporate_risk_exposure
+            where deleted_flag = 0
+            group by contract_no
+        ) ex on ex.contract_no = ct.contract_no
+        left join (
+            select contract_no,
+                   count(*) as overdue_count,
+                   max(overdue_days) as max_overdue_days
+            from corporate_credit_overdue
+            where deleted_flag = 0
+            group by contract_no
+        ) ov on ov.contract_no = ct.contract_no
+        left join (
+            select contract_no,
+                   count(*) as debt_default_count,
+                   min(case default_level when 'A' then 1 when 'B' then 2 when 'C' then 3 else 9 end) as highest_default_rank
+            from corporate_debt_default
+            where deleted_flag = 0
+            group by contract_no
+        ) dd on dd.contract_no = ct.contract_no
+        where app.deleted_flag = 0
+          and c.deleted_flag = 0
+        <if test="criteria.keyword != null and criteria.keyword != ''">
+            and (
+                app.application_no like concat('%', #{criteria.keyword}, '%')
+                or c.customer_no like concat('%', #{criteria.keyword}, '%')
+                or c.customer_name like concat('%', #{criteria.keyword}, '%')
+                or ifnull(l.limit_no, '') like concat('%', #{criteria.keyword}, '%')
+                or ifnull(ct.contract_no, '') like concat('%', #{criteria.keyword}, '%')
+                or app.product_type like concat('%', #{criteria.keyword}, '%')
+            )
+        </if>
+        <if test="criteria.customerNo != null and criteria.customerNo != ''">
+            and c.customer_no like concat('%', #{criteria.customerNo}, '%')
+        </if>
+        <if test="criteria.ratingLevel != null and criteria.ratingLevel != ''">
+            and r.rating_level = #{criteria.ratingLevel}
+        </if>
+        <if test="criteria.riskLevel != null and criteria.riskLevel != ''">
+            and (c.risk_level = #{criteria.riskLevel} or ifnull(app.customer_risk_level, '') = #{criteria.riskLevel})
+        </if>
+        <if test="criteria.productType != null and criteria.productType != ''">
+            and (app.product_type like concat('%', #{criteria.productType}, '%') or ifnull(ct.product_type, '') like concat('%', #{criteria.productType}, '%'))
+        </if>
+        <if test="criteria.status != null and criteria.status != ''">
+            and (app.application_status = #{criteria.status} or ifnull(ct.contract_status, '') = #{criteria.status})
+        </if>
+        <if test="criteria.defaultLevel != null and criteria.defaultLevel != ''">
+            and exists (
+                select 1
+                from corporate_debt_default x
+                where x.contract_no = ct.contract_no
+                  and x.deleted_flag = 0
+                  and x.default_level = #{criteria.defaultLevel}
+            )
+        </if>
+        <if test="criteria.ownerOrgName != null and criteria.ownerOrgName != ''">
+            and (
+                ifnull(app.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+                or ifnull(ct.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+                or ifnull(c.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+            )
+        </if>
+        <if test="criteria.startDate != null">
+            and date(coalesce(ct.sign_date, app.approved_at, app.submitted_at, app.created_at)) &gt;= #{criteria.startDate}
+        </if>
+        <if test="criteria.endDate != null">
+            and date(coalesce(ct.sign_date, app.approved_at, app.submitted_at, app.created_at)) &lt;= #{criteria.endDate}
+        </if>
+    </sql>
+
+    <select id="listApplicationContractView" resultType="map">
+        select
+            app.id,
+            app.application_no,
+            c.customer_no,
+            c.customer_name,
+            r.rating_level,
+            ifnull(l.limit_no, '') as limit_no,
+            app.application_type,
+            app.product_type,
+            app.apply_amount,
+            app.apply_term_months,
+            app.apply_rate,
+            app.risk_assessment_result,
+            app.application_status,
+            date_format(app.submitted_at, '%Y-%m-%d %H:%i:%s') as submitted_at,
+            date_format(app.approved_at, '%Y-%m-%d %H:%i:%s') as approved_at,
+            ifnull(ct.contract_no, '') as contract_no,
+            ifnull(ct.contract_name, '') as contract_name,
+            ifnull(ct.contract_amount, 0) as contract_amount,
+            ifnull(ct.used_draw_amount, 0) as used_draw_amount,
+            ifnull(ct.available_draw_amount, 0) as available_draw_amount,
+            ct.sign_date,
+            ct.effective_date,
+            ct.expiry_date,
+            ifnull(ct.contract_status, '') as contract_status,
+            ifnull(dr.drawdown_count, 0) as drawdown_count,
+            ifnull(dr.actual_draw_amount_total, 0) as actual_draw_amount_total,
+            ifnull(dr.outstanding_principal_amount_total, 0) as outstanding_principal_amount_total,
+            ifnull(rel.collateral_relation_count, 0) as collateral_relation_count,
+            ifnull(rel.total_secured_amount, 0) as total_secured_amount,
+            ifnull(ex.exposure_count, 0) as exposure_count,
+            ifnull(ex.ead_amount_total, 0) as ead_amount_total,
+            ex.max_pd,
+            ifnull(ex.el_avg_total, 0) as el_avg_total,
+            ifnull(ov.overdue_count, 0) as overdue_count,
+            ifnull(ov.max_overdue_days, 0) as max_overdue_days,
+            ifnull(dd.debt_default_count, 0) as debt_default_count,
+            case dd.highest_default_rank when 1 then 'A' when 2 then 'B' when 3 then 'C' else '' end as highest_default_level,
+            app.owner_org_name,
+            app.manager_name
+        <include refid="applicationContractViewFrom"/>
+        order by
+            case
+                when ifnull(dd.debt_default_count, 0) &gt; 0 then 1
+                when ifnull(ov.overdue_count, 0) &gt; 0 then 2
+                else 3
+            end,
+            app.created_at desc,
+            app.application_no
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countApplicationContractView" resultType="long">
+        select count(*)
+        <include refid="applicationContractViewFrom"/>
+    </select>
+
+    <sql id="latestExposureByDrawdown">
+        select ex1.*
+        from corporate_risk_exposure ex1
+        join (
+            select drawdown_no, max(id) as id
+            from corporate_risk_exposure
+            where deleted_flag = 0
+            group by drawdown_no
+        ) ex2 on ex1.id = ex2.id
+    </sql>
+
+    <sql id="debtExposureViewFrom">
+        from corporate_credit_drawdown dr
+        join corporate_customer c on c.customer_no = dr.customer_no_snapshot
+        left join corporate_credit_contract ct on ct.contract_no = dr.contract_no_snapshot and ct.deleted_flag = 0
+        left join corporate_rating r on r.active_customer_no = c.customer_no
+        left join (
+            <include refid="latestExposureByDrawdown"/>
+        ) ex on ex.drawdown_no = dr.drawdown_no
+        left join (
+            select debt_no,
+                   count(*) as overdue_count,
+                   max(overdue_days) as max_overdue_days,
+                   sum(total_overdue_amount) as overdue_amount_total
+            from corporate_credit_overdue
+            where deleted_flag = 0
+            group by debt_no
+        ) ov on ov.debt_no = dr.debt_no
+        left join corporate_debt_default dd on dd.debt_no = dr.debt_no and dd.deleted_flag = 0
+        left join corporate_customer_default cd on cd.active_customer_no = c.customer_no
+        left join (
+            select contract_no,
+                   count(*) as collateral_relation_count,
+                   sum(secured_amount) as total_secured_amount
+            from corporate_credit_contract_collateral
+            where deleted_flag = 0
+              and relation_status = 'ACTIVE'
+            group by contract_no
+        ) rel on rel.contract_no = dr.contract_no_snapshot
+        where dr.deleted_flag = 0
+          and c.deleted_flag = 0
+        <if test="criteria.keyword != null and criteria.keyword != ''">
+            and (
+                dr.drawdown_no like concat('%', #{criteria.keyword}, '%')
+                or ifnull(dr.debt_no, '') like concat('%', #{criteria.keyword}, '%')
+                or c.customer_no like concat('%', #{criteria.keyword}, '%')
+                or c.customer_name like concat('%', #{criteria.keyword}, '%')
+                or ifnull(ct.contract_no, '') like concat('%', #{criteria.keyword}, '%')
+                or ifnull(ex.exposure_no, '') like concat('%', #{criteria.keyword}, '%')
+                or ifnull(dd.debt_default_no, '') like concat('%', #{criteria.keyword}, '%')
+            )
+        </if>
+        <if test="criteria.customerNo != null and criteria.customerNo != ''">
+            and c.customer_no like concat('%', #{criteria.customerNo}, '%')
+        </if>
+        <if test="criteria.ratingLevel != null and criteria.ratingLevel != ''">
+            and (r.rating_level = #{criteria.ratingLevel} or ifnull(ex.rating_result, '') = #{criteria.ratingLevel})
+        </if>
+        <if test="criteria.riskLevel != null and criteria.riskLevel != ''">
+            and (dr.risk_level = #{criteria.riskLevel} or ifnull(ex.risk_level, '') = #{criteria.riskLevel} or c.risk_level = #{criteria.riskLevel})
+        </if>
+        <if test="criteria.productType != null and criteria.productType != ''">
+            and (dr.product_type like concat('%', #{criteria.productType}, '%') or ifnull(ex.product_type, '') like concat('%', #{criteria.productType}, '%'))
+        </if>
+        <if test="criteria.status != null and criteria.status != ''">
+            and (dr.drawdown_status = #{criteria.status} or ifnull(ex.exposure_status, '') = #{criteria.status})
+        </if>
+        <if test="criteria.defaultLevel != null and criteria.defaultLevel != ''">
+            and dd.default_level = #{criteria.defaultLevel}
+        </if>
+        <if test="criteria.ownerOrgName != null and criteria.ownerOrgName != ''">
+            and (
+                ifnull(dr.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+                or ifnull(ct.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+                or ifnull(c.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+            )
+        </if>
+        <if test="criteria.startDate != null">
+            and dr.drawdown_date &gt;= #{criteria.startDate}
+        </if>
+        <if test="criteria.endDate != null">
+            and dr.drawdown_date &lt;= #{criteria.endDate}
+        </if>
+    </sql>
+
+    <select id="listDebtExposureView" resultType="map">
+        select
+            dr.id,
+            dr.drawdown_no,
+            ifnull(dr.debt_no, '') as debt_no,
+            c.customer_no,
+            c.customer_name,
+            r.rating_level,
+            dr.contract_no_snapshot as contract_no,
+            ifnull(ct.contract_name, '') as contract_name,
+            dr.application_no_snapshot as application_no,
+            dr.limit_no_snapshot as limit_no,
+            dr.product_type,
+            dr.actual_draw_amount,
+            dr.repaid_principal_amount,
+            dr.outstanding_principal_amount,
+            dr.interest_receivable_amount,
+            dr.overdue_principal_amount,
+            dr.overdue_interest_amount,
+            dr.drawdown_date,
+            dr.maturity_date,
+            dr.five_category,
+            dr.risk_level as drawdown_risk_level,
+            dr.overdue_days as drawdown_overdue_days,
+            dr.drawdown_status,
+            ifnull(ex.exposure_no, '') as exposure_no,
+            ifnull(ex.exposure_balance, 0) as exposure_balance,
+            ifnull(ex.ead_amount, 0) as ead_amount,
+            ifnull(ex.lgd_avg, 0) as lgd_avg,
+            ifnull(ex.lgd_downturn, 0) as lgd_downturn,
+            ifnull(ex.pd, 0) as pd,
+            ifnull(ex.el_avg, 0) as el_avg,
+            ifnull(ex.el_downturn, 0) as el_downturn,
+            ifnull(ex.product_recovery_rate, 0) as product_recovery_rate,
+            ifnull(ex.exposure_status, '') as exposure_status,
+            ifnull(ov.overdue_count, 0) as overdue_count,
+            ifnull(ov.max_overdue_days, 0) as max_overdue_days,
+            ifnull(ov.overdue_amount_total, 0) as overdue_amount_total,
+            ifnull(dd.debt_default_no, '') as debt_default_no,
+            ifnull(dd.default_level, '') as default_level,
+            dd.default_date,
+            ifnull(dd.default_exposure_amount, 0) as default_exposure_amount,
+            ifnull(cd.customer_default_no, '') as customer_default_no,
+            ifnull(cd.default_status, '') as customer_default_status,
+            ifnull(rel.collateral_relation_count, 0) as collateral_relation_count,
+            ifnull(rel.total_secured_amount, 0) as total_secured_amount,
+            dr.owner_org_name,
+            dr.manager_name
+        <include refid="debtExposureViewFrom"/>
+        order by
+            case when dd.id is not null then 1 when ifnull(ov.overdue_count, 0) &gt; 0 then 2 else 3 end,
+            dr.drawdown_date desc,
+            dr.drawdown_no
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countDebtExposureView" resultType="long">
+        select count(*)
+        <include refid="debtExposureViewFrom"/>
+    </select>
+
+    <sql id="latestExposureByDebt">
+        select ex1.*
+        from corporate_risk_exposure ex1
+        join (
+            select debt_no, max(id) as id
+            from corporate_risk_exposure
+            where deleted_flag = 0
+            group by debt_no
+        ) ex2 on ex1.id = ex2.id
+    </sql>
+
+    <sql id="defaultOverdueViewFrom">
+        from corporate_credit_overdue ov
+        join corporate_customer c on c.customer_no = ov.customer_no
+        left join corporate_rating r on r.active_customer_no = c.customer_no
+        left join corporate_credit_drawdown dr on dr.drawdown_no = ov.drawdown_no and dr.deleted_flag = 0
+        left join corporate_credit_contract ct on ct.contract_no = ov.contract_no and ct.deleted_flag = 0
+        left join (
+            <include refid="latestExposureByDebt"/>
+        ) ex on ex.debt_no = ov.debt_no
+        left join corporate_debt_default dd on dd.debt_no = ov.debt_no and dd.deleted_flag = 0
+        left join corporate_customer_default cd on cd.active_customer_no = c.customer_no
+        where ov.deleted_flag = 0
+          and c.deleted_flag = 0
+        <if test="criteria.keyword != null and criteria.keyword != ''">
+            and (
+                ov.overdue_no like concat('%', #{criteria.keyword}, '%')
+                or c.customer_no like concat('%', #{criteria.keyword}, '%')
+                or c.customer_name like concat('%', #{criteria.keyword}, '%')
+                or ov.contract_no like concat('%', #{criteria.keyword}, '%')
+                or ov.debt_no like concat('%', #{criteria.keyword}, '%')
+                or ifnull(ov.drawdown_no, '') like concat('%', #{criteria.keyword}, '%')
+                or ifnull(dd.debt_default_no, '') like concat('%', #{criteria.keyword}, '%')
+                or ifnull(cd.customer_default_no, '') like concat('%', #{criteria.keyword}, '%')
+            )
+        </if>
+        <if test="criteria.customerNo != null and criteria.customerNo != ''">
+            and c.customer_no like concat('%', #{criteria.customerNo}, '%')
+        </if>
+        <if test="criteria.ratingLevel != null and criteria.ratingLevel != ''">
+            and (r.rating_level = #{criteria.ratingLevel} or ifnull(dd.rating_result, '') = #{criteria.ratingLevel} or ifnull(ex.rating_result, '') = #{criteria.ratingLevel})
+        </if>
+        <if test="criteria.riskLevel != null and criteria.riskLevel != ''">
+            and (ov.risk_level = #{criteria.riskLevel} or ifnull(ex.risk_level, '') = #{criteria.riskLevel} or c.risk_level = #{criteria.riskLevel})
+        </if>
+        <if test="criteria.productType != null and criteria.productType != ''">
+            and (ov.product_type like concat('%', #{criteria.productType}, '%') or ifnull(dd.product_type, '') like concat('%', #{criteria.productType}, '%') or ifnull(ex.product_type, '') like concat('%', #{criteria.productType}, '%'))
+        </if>
+        <if test="criteria.status != null and criteria.status != ''">
+            and (ov.repayment_status = #{criteria.status} or ov.collection_status = #{criteria.status} or ifnull(dd.default_status, '') = #{criteria.status})
+        </if>
+        <if test="criteria.defaultLevel != null and criteria.defaultLevel != ''">
+            and dd.default_level = #{criteria.defaultLevel}
+        </if>
+        <if test="criteria.ownerOrgName != null and criteria.ownerOrgName != ''">
+            and (
+                ifnull(ov.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+                or ifnull(ct.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+                or ifnull(c.owner_org_name, '') like concat('%', #{criteria.ownerOrgName}, '%')
+            )
+        </if>
+        <if test="criteria.startDate != null">
+            and ov.overdue_date &gt;= #{criteria.startDate}
+        </if>
+        <if test="criteria.endDate != null">
+            and ov.overdue_date &lt;= #{criteria.endDate}
+        </if>
+    </sql>
+
+    <select id="listDefaultOverdueView" resultType="map">
+        select
+            ov.id,
+            ov.overdue_no,
+            c.customer_no,
+            c.customer_name,
+            r.rating_level,
+            ov.contract_no,
+            ov.debt_no,
+            ifnull(ov.drawdown_no, '') as drawdown_no,
+            ov.product_type,
+            ov.due_date,
+            ov.overdue_date,
+            ov.overdue_days,
+            ov.grace_days,
+            ov.grace_due_date,
+            ov.legal_holiday_flag,
+            ov.total_overdue_amount,
+            ov.remaining_overdue_amount,
+            ov.repayment_status,
+            ov.collection_status,
+            ov.default_flag,
+            ov.five_category,
+            ov.risk_level as overdue_risk_level,
+            ifnull(ex.exposure_no, '') as exposure_no,
+            ifnull(ex.ead_amount, 0) as ead_amount,
+            ifnull(ex.pd, 0) as pd,
+            ifnull(ex.lgd_avg, 0) as lgd_avg,
+            ifnull(ex.el_avg, 0) as el_avg,
+            ifnull(dd.debt_default_no, '') as debt_default_no,
+            ifnull(dd.default_level, '') as default_level,
+            dd.default_date,
+            ifnull(dd.default_exposure_amount, 0) as default_exposure_amount,
+            ifnull(dd.loss_amount, 0) as loss_amount,
+            ifnull(dd.default_status, '') as default_status,
+            ifnull(cd.customer_default_no, '') as customer_default_no,
+            ifnull(cd.highest_default_level, '') as customer_default_level,
+            ifnull(cd.default_status, '') as customer_default_status,
+            ov.owner_org_name,
+            ov.manager_name
+        <include refid="defaultOverdueViewFrom"/>
+        order by
+            case when dd.id is not null then 1 else 2 end,
+            ov.overdue_date desc,
+            ov.overdue_no
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countDefaultOverdueView" resultType="long">
+        select count(*)
+        <include refid="defaultOverdueViewFrom"/>
+    </select>
+</mapper>

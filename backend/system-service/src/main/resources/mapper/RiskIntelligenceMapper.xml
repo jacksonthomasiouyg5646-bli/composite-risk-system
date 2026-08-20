@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.RiskIntelligenceMapper">
+
+    <insert id="insertExternalDataAccessLog" parameterType="map">
+        insert into risk_external_data_access_log
+          (customer_no, provider_name, query_status, data_available, external_risk_score, data_source)
+        values
+          (#{customer_no}, #{provider_name}, #{query_status}, #{data_available}, #{external_risk_score}, #{data_source})
+    </insert>
+
+    <insert id="insertAiChatLog" parameterType="map">
+        insert into risk_ai_chat_log
+          (customer_no, question, answer_type, external_status)
+        values
+          (#{customer_no}, #{question}, #{answer_type}, #{external_status})
+    </insert>
+
+    <select id="getExternalDataStatusSummary" resultType="map">
+        select
+            count(*) as query_count_today,
+            ifnull(sum(data_available = 1), 0) as available_count_today,
+            ifnull(sum(query_status = 'UNAVAILABLE'), 0) as unavailable_count_today,
+            ifnull(sum(query_status = 'NOT_ENABLED'), 0) as not_enabled_count_today
+        from risk_external_data_access_log
+        where requested_at >= current_date
+    </select>
+
+    <select id="getLatestExternalDataAccess" resultType="map">
+        select customer_no, provider_name, query_status, data_available, external_risk_score, data_source, requested_at
+        from risk_external_data_access_log
+        order by id desc
+        limit 1
+    </select>
+
+    <select id="listModelSnapshots" resultType="map">
+        select snapshot_date, model_name, rule_count, customer_total, average_risk_score,
+               extreme_risk_count, high_risk_count, warning_customer_count, forecast_upgrade_count,
+               external_query_count, external_available_count, external_unavailable_count, created_at
+        from risk_model_monitor_snapshot
+        order by snapshot_date desc, id desc
+        limit #{limit}
+    </select>
+
+    <insert id="upsertModelSnapshot" parameterType="map">
+        insert into risk_model_monitor_snapshot
+          (snapshot_date, model_name, rule_count, customer_total, average_risk_score, extreme_risk_count,
+           high_risk_count, warning_customer_count, forecast_upgrade_count, external_query_count,
+           external_available_count, external_unavailable_count)
+        values
+          (#{snapshot_date}, #{model_name}, #{rule_count}, #{customer_total}, #{average_risk_score}, #{extreme_risk_count},
+           #{high_risk_count}, #{warning_customer_count}, #{forecast_upgrade_count}, #{external_query_count},
+           #{external_available_count}, #{external_unavailable_count})
+        on duplicate key update
+          rule_count = values(rule_count),
+          customer_total = values(customer_total),
+          average_risk_score = values(average_risk_score),
+          extreme_risk_count = values(extreme_risk_count),
+          high_risk_count = values(high_risk_count),
+          warning_customer_count = values(warning_customer_count),
+          forecast_upgrade_count = values(forecast_upgrade_count),
+          external_query_count = values(external_query_count),
+          external_available_count = values(external_available_count),
+          external_unavailable_count = values(external_unavailable_count)
+    </insert>
+
+    <select id="listProductReport" resultType="map">
+        select
+            d.product_type,
+            count(*) as drawdown_count,
+            ifnull(sum(d.outstanding_principal_amount), 0) as outstanding_amount,
+            ifnull(sum(ov.overdue_count), 0) as overdue_count,
+            ifnull(sum(dd.default_count), 0) as debt_default_count,
+            ifnull(sum(dd.default_exposure_amount), 0) as default_exposure_amount
+        from corporate_credit_drawdown d
+        left join (
+            select drawdown_no, count(*) as overdue_count
+            from corporate_credit_overdue
+            where deleted_flag = 0
+            group by drawdown_no
+        ) ov on ov.drawdown_no = d.drawdown_no
+        left join (
+            select drawdown_no, count(*) as default_count, sum(default_exposure_amount) as default_exposure_amount
+            from corporate_debt_default
+            where deleted_flag = 0 and default_status = 'ACTIVE'
+            group by drawdown_no
+        ) dd on dd.drawdown_no = d.drawdown_no
+        where d.deleted_flag = 0
+        group by d.product_type
+        order by debt_default_count desc, overdue_count desc, outstanding_amount desc
+    </select>
+</mapper>

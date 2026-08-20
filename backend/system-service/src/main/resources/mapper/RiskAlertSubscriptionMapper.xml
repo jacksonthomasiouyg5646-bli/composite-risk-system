@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.RiskAlertSubscriptionMapper">
+
+    <select id="listSubscriptions" resultType="map">
+        select id, subscription_code, subscription_name, frequency, channel, target_type, recipients, enabled,
+               last_dispatch_at, created_at, updated_at
+        from risk_alert_subscription
+        <if test="keyword != null and keyword != ''">
+            where subscription_code like concat('%', #{keyword}, '%')
+               or subscription_name like concat('%', #{keyword}, '%')
+               or ifnull(recipients, '') like concat('%', #{keyword}, '%')
+        </if>
+        order by id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countSubscriptions" resultType="long">
+        select count(*) from risk_alert_subscription
+        <if test="keyword != null and keyword != ''">
+            where subscription_code like concat('%', #{keyword}, '%')
+               or subscription_name like concat('%', #{keyword}, '%')
+               or ifnull(recipients, '') like concat('%', #{keyword}, '%')
+        </if>
+    </select>
+
+    <select id="getSubscription" resultType="map">
+        select id, subscription_code, subscription_name, frequency, channel, target_type, recipients, enabled,
+               last_dispatch_at, created_at, updated_at
+        from risk_alert_subscription
+        where id = #{id}
+    </select>
+
+    <select id="listReadyDailySubscriptions" resultType="map">
+        select id, subscription_code, subscription_name, frequency, channel, target_type, recipients, enabled,
+               last_dispatch_at, created_at, updated_at
+        from risk_alert_subscription
+        where enabled = 1
+          and frequency = 'DAILY'
+          and (last_dispatch_at is null or date(last_dispatch_at) &lt; current_date)
+    </select>
+
+    <insert id="insertSubscription" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_alert_subscription
+          (subscription_code, subscription_name, frequency, channel, target_type, recipients, enabled)
+        values
+          (#{subscription_code}, #{subscription_name}, #{frequency}, #{channel}, #{target_type}, #{recipients}, #{enabled})
+    </insert>
+
+    <update id="updateSubscription">
+        update risk_alert_subscription
+        <set>
+            <if test="body.subscription_code != null">subscription_code = #{body.subscription_code},</if>
+            <if test="body.subscription_name != null">subscription_name = #{body.subscription_name},</if>
+            <if test="body.frequency != null">frequency = #{body.frequency},</if>
+            <if test="body.channel != null">channel = #{body.channel},</if>
+            <if test="body.target_type != null">target_type = #{body.target_type},</if>
+            <if test="body.recipients != null">recipients = #{body.recipients},</if>
+            <if test="body.enabled != null">enabled = #{body.enabled},</if>
+        </set>
+        where id = #{id}
+    </update>
+
+    <update id="updateLastDispatch">
+        update risk_alert_subscription
+        set last_dispatch_at = #{lastDispatchAt}
+        where id = #{id}
+    </update>
+
+    <delete id="deleteSubscription">delete from risk_alert_subscription where id = #{id}</delete>
+</mapper>

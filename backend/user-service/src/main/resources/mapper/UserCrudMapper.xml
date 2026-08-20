@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.user.mapper.UserCrudMapper">
+    <sql id="keywordUsers">
+        <if test="keyword != null and keyword != ''">
+            where username like concat('%', #{keyword}, '%')
+        </if>
+    </sql>
+    <select id="listUsers" resultType="map">
+        select * from sys_user <include refid="keywordUsers"/> order by id desc limit #{limit} offset #{offset}
+    </select>
+    <select id="listEnabledUsers" resultType="map">
+        select id, tenant_id, department_id, post_id, username, display_name, email, phone, avatar, status
+        from sys_user
+        where status = 'ENABLED'
+        order by id
+    </select>
+    <select id="countUsers" resultType="long">
+        select count(*) from sys_user <include refid="keywordUsers"/>
+    </select>
+    <select id="getUser" resultType="map">select * from sys_user where id = #{id}</select>
+    <insert id="insertUser" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into sys_user
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="tenant_id != null">tenant_id,</if><if test="department_id != null">department_id,</if><if test="post_id != null">post_id,</if>
+            <if test="username != null">username,</if><if test="password_hash != null">password_hash,</if><if test="display_name != null">display_name,</if>
+            <if test="email != null">email,</if><if test="phone != null">phone,</if><if test="avatar != null">avatar,</if><if test="status != null">status,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="tenant_id != null">#{tenant_id},</if><if test="department_id != null">#{department_id},</if><if test="post_id != null">#{post_id},</if>
+            <if test="username != null">#{username},</if><if test="password_hash != null">#{password_hash},</if><if test="display_name != null">#{display_name},</if>
+            <if test="email != null">#{email},</if><if test="phone != null">#{phone},</if><if test="avatar != null">#{avatar},</if><if test="status != null">#{status},</if>
+        </trim>
+    </insert>
+    <update id="updateUser">
+        update sys_user
+        <set>
+            <if test="body.tenant_id != null">tenant_id = #{body.tenant_id},</if><if test="body.department_id != null">department_id = #{body.department_id},</if>
+            <if test="body.post_id != null">post_id = #{body.post_id},</if><if test="body.username != null">username = #{body.username},</if>
+            <if test="body.password_hash != null">password_hash = #{body.password_hash},</if><if test="body.display_name != null">display_name = #{body.display_name},</if>
+            <if test="body.email != null">email = #{body.email},</if><if test="body.phone != null">phone = #{body.phone},</if>
+            <if test="body.avatar != null">avatar = #{body.avatar},</if><if test="body.status != null">status = #{body.status},</if>
+        </set>
+        where id = #{id}
+    </update>
+    <delete id="deleteUser">delete from sys_user where id = #{id}</delete>
+
+    <sql id="roleColumns">name, code, description, status, tenant_id</sql>
+    <select id="listRoles" resultType="map">
+        select * from sys_role <if test="keyword != null and keyword != ''">where name like concat('%', #{keyword}, '%')</if> order by id desc limit #{limit} offset #{offset}
+    </select>
+    <select id="countRoles" resultType="long">select count(*) from sys_role <if test="keyword != null and keyword != ''">where name like concat('%', #{keyword}, '%')</if></select>
+    <select id="getRole" resultType="map">select * from sys_role where id = #{id}</select>
+    <insert id="insertRole" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into sys_role
+        <trim prefix="(" suffix=")" suffixOverrides=","><if test="tenant_id != null">tenant_id,</if><if test="name != null">name,</if><if test="code != null">code,</if><if test="description != null">description,</if><if test="status != null">status,</if></trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=","><if test="tenant_id != null">#{tenant_id},</if><if test="name != null">#{name},</if><if test="code != null">#{code},</if><if test="description != null">#{description},</if><if test="status != null">#{status},</if></trim>
+    </insert>
+    <update id="updateRole">update sys_role <set><if test="body.tenant_id != null">tenant_id=#{body.tenant_id},</if><if test="body.name != null">name=#{body.name},</if><if test="body.code != null">code=#{body.code},</if><if test="body.description != null">description=#{body.description},</if><if test="body.status != null">status=#{body.status},</if></set> where id=#{id}</update>
+    <delete id="deleteRole">delete from sys_role where id = #{id}</delete>
+
+    <select id="listPermissions" resultType="map">select * from sys_permission <if test="keyword != null and keyword != ''">where name like concat('%', #{keyword}, '%')</if> order by id desc limit #{limit} offset #{offset}</select>
+    <select id="countPermissions" resultType="long">select count(*) from sys_permission <if test="keyword != null and keyword != ''">where name like concat('%', #{keyword}, '%')</if></select>
+    <select id="getPermission" resultType="map">select * from sys_permission where id = #{id}</select>
+    <insert id="insertPermission" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into sys_permission
+        <trim prefix="(" suffix=")" suffixOverrides=","><if test="name != null">name,</if><if test="code != null">code,</if><if test="module != null">module,</if><if test="description != null">description,</if></trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=","><if test="name != null">#{name},</if><if test="code != null">#{code},</if><if test="module != null">#{module},</if><if test="description != null">#{description},</if></trim>
+    </insert>
+    <update id="updatePermission">update sys_permission <set><if test="body.name != null">name=#{body.name},</if><if test="body.code != null">code=#{body.code},</if><if test="body.module != null">module=#{body.module},</if><if test="body.description != null">description=#{body.description},</if></set> where id=#{id}</update>
+    <delete id="deletePermission">delete from sys_permission where id = #{id}</delete>
+
+    <select id="listDepartments" resultType="map">select * from sys_department <if test="keyword != null and keyword != ''">where name like concat('%', #{keyword}, '%')</if> order by id desc limit #{limit} offset #{offset}</select>
+    <select id="countDepartments" resultType="long">select count(*) from sys_department <if test="keyword != null and keyword != ''">where name like concat('%', #{keyword}, '%')</if></select>
+    <select id="getDepartment" resultType="map">select * from sys_department where id = #{id}</select>
+    <insert id="insertDepartment" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into sys_department
+        <trim prefix="(" suffix=")" suffixOverrides=","><if test="tenant_id != null">tenant_id,</if><if test="parent_id != null">parent_id,</if><if test="name != null">name,</if><if test="code != null">code,</if><if test="leader != null">leader,</if><if test="phone != null">phone,</if><if test="sort_order != null">sort_order,</if><if test="status != null">status,</if></trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=","><if test="tenant_id != null">#{tenant_id},</if><if test="parent_id != null">#{parent_id},</if><if test="name != null">#{name},</if><if test="code != null">#{code},</if><if test="leader != null">#{leader},</if><if test="phone != null">#{phone},</if><if test="sort_order != null">#{sort_order},</if><if test="status != null">#{status},</if></trim>
+    </insert>
+    <update id="updateDepartment">update sys_department <set><if test="body.tenant_id != null">tenant_id=#{body.tenant_id},</if><if test="body.parent_id != null">parent_id=#{body.parent_id},</if><if test="body.name != null">name=#{body.name},</if><if test="body.code != null">code=#{body.code},</if><if test="body.leader != null">leader=#{body.leader},</if><if test="body.phone != null">phone=#{body.phone},</if><if test="body.sort_order != null">sort_order=#{body.sort_order},</if><if test="body.status != null">status=#{body.status},</if></set> where id=#{id}</update>
+    <delete id="deleteDepartment">delete from sys_department where id = #{id}</delete>
+
+    <select id="listPosts" resultType="map">select * from sys_post <if test="keyword != null and keyword != ''">where name like concat('%', #{keyword}, '%')</if> order by id desc limit #{limit} offset #{offset}</select>
+    <select id="countPosts" resultType="long">select count(*) from sys_post <if test="keyword != null and keyword != ''">where name like concat('%', #{keyword}, '%')</if></select>
+    <select id="getPost" resultType="map">select * from sys_post where id = #{id}</select>
+    <insert id="insertPost" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into sys_post
+        <trim prefix="(" suffix=")" suffixOverrides=","><if test="tenant_id != null">tenant_id,</if><if test="name != null">name,</if><if test="code != null">code,</if><if test="sort_order != null">sort_order,</if><if test="status != null">status,</if></trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=","><if test="tenant_id != null">#{tenant_id},</if><if test="name != null">#{name},</if><if test="code != null">#{code},</if><if test="sort_order != null">#{sort_order},</if><if test="status != null">#{status},</if></trim>
+    </insert>
+    <update id="updatePost">update sys_post <set><if test="body.tenant_id != null">tenant_id=#{body.tenant_id},</if><if test="body.name != null">name=#{body.name},</if><if test="body.code != null">code=#{body.code},</if><if test="body.sort_order != null">sort_order=#{body.sort_order},</if><if test="body.status != null">status=#{body.status},</if></set> where id=#{id}</update>
+    <delete id="deletePost">delete from sys_post where id = #{id}</delete>
+
+    <select id="listMenus" resultType="map">select * from sys_menu <if test="keyword != null and keyword != ''">where title like concat('%', #{keyword}, '%')</if> order by id desc limit #{limit} offset #{offset}</select>
+    <select id="countMenus" resultType="long">select count(*) from sys_menu <if test="keyword != null and keyword != ''">where title like concat('%', #{keyword}, '%')</if></select>
+    <select id="getMenu" resultType="map">select * from sys_menu where id = #{id}</select>
+    <insert id="insertMenu" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into sys_menu
+        <trim prefix="(" suffix=")" suffixOverrides=","><if test="parent_id != null">parent_id,</if><if test="title != null">title,</if><if test="path != null">path,</if><if test="component != null">component,</if><if test="icon != null">icon,</if><if test="permission_code != null">permission_code,</if><if test="sort_order != null">sort_order,</if><if test="visible != null">visible,</if></trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=","><if test="parent_id != null">#{parent_id},</if><if test="title != null">#{title},</if><if test="path != null">#{path},</if><if test="component != null">#{component},</if><if test="icon != null">#{icon},</if><if test="permission_code != null">#{permission_code},</if><if test="sort_order != null">#{sort_order},</if><if test="visible != null">#{visible},</if></trim>
+    </insert>
+    <update id="updateMenu">update sys_menu <set><if test="body.parent_id != null">parent_id=#{body.parent_id},</if><if test="body.title != null">title=#{body.title},</if><if test="body.path != null">path=#{body.path},</if><if test="body.component != null">component=#{body.component},</if><if test="body.icon != null">icon=#{body.icon},</if><if test="body.permission_code != null">permission_code=#{body.permission_code},</if><if test="body.sort_order != null">sort_order=#{body.sort_order},</if><if test="body.visible != null">visible=#{body.visible},</if></set> where id=#{id}</update>
+    <delete id="deleteMenu">delete from sys_menu where id = #{id}</delete>
+</mapper>

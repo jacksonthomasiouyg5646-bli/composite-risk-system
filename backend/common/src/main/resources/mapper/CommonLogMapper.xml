@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.common.mapper.CommonLogMapper">
+    <insert id="insertOperationLog">
+        insert into sys_operation_log(username, module, action, method, request_uri, status)
+        values (#{username}, #{module}, #{action}, #{method}, #{requestUri}, #{status})
+    </insert>
+
+    <insert id="insertErrorLog">
+        insert into sys_error_log(service_name, trace_id, message, stack_trace)
+        values (#{serviceName}, #{traceId}, #{message}, #{stackTrace})
+    </insert>
+</mapper>

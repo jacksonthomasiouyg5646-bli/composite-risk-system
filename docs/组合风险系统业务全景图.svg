@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980">
+  <defs>
+    <style>
+      text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif;fill:#203247}.title{font-size:34px;font-weight:700}.sub{font-size:15px;fill:#64748b}.h{font-size:20px;font-weight:700}.sh{font-size:16px;font-weight:700}.t{font-size:14px}.s{font-size:12px;fill:#52657a}.box{fill:#fff;stroke:#cbd8e5;stroke-width:1.5}.blue{fill:#eaf3fb;stroke:#4381ad}.green{fill:#eaf7f2;stroke:#2d9274}.orange{fill:#fff3e5;stroke:#d9872d}.red{fill:#fceceb;stroke:#c7524b}.band{fill:#f4f7fa;stroke:#cbd8e5}.arrow{stroke:#7890a6;stroke-width:2;fill:none;marker-end:url(#a)}
+    </style>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#7890a6"/></marker>
+  </defs>
+  <rect width="1600" height="980" fill="#f7f9fc"/>
+  <text x="50" y="55" class="title">组合风险系统业务全景图</text>
+  <text x="50" y="82" class="sub">围绕月末批量加工，贯通信贷业务、组合计量、限额预警、风险处置和管理决策</text>
+
+  <rect x="40" y="110" width="270" height="650" rx="8" class="box"/><text x="60" y="145" class="h">一、信贷业务数据</text>
+  <rect x="60" y="170" width="105" height="48" rx="6" class="blue"/><text x="112" y="199" text-anchor="middle" class="t">集团与关联方</text>
+  <rect x="185" y="170" width="105" height="48" rx="6" class="blue"/><text x="237" y="199" text-anchor="middle" class="t">客户信息</text>
+  <path d="M165 194H185" class="arrow"/>
+  <rect x="60" y="245" width="105" height="48" rx="6" class="blue"/><text x="112" y="274" text-anchor="middle" class="t">评级信息</text>
+  <rect x="185" y="245" width="105" height="48" rx="6" class="blue"/><text x="237" y="274" text-anchor="middle" class="t">授信额度</text>
+  <path d="M237 218V245" class="arrow"/><path d="M185 269H165" class="arrow"/>
+  <rect x="92" y="320" width="166" height="48" rx="6" class="blue"/><text x="175" y="349" text-anchor="middle" class="t">业务申请</text><path d="M237 293L190 320" class="arrow"/>
+  <rect x="92" y="395" width="166" height="48" rx="6" class="blue"/><text x="175" y="424" text-anchor="middle" class="t">信贷合同</text><path d="M175 368V395" class="arrow"/>
+  <rect x="60" y="470" width="105" height="48" rx="6" class="blue"/><text x="112" y="499" text-anchor="middle" class="t">债项支用</text>
+  <rect x="185" y="470" width="105" height="48" rx="6" class="green"/><text x="237" y="499" text-anchor="middle" class="t">押品信息</text><path d="M175 443L125 470" class="arrow"/><path d="M175 443L225 470" class="arrow"/>
+  <rect x="60" y="545" width="105" height="48" rx="6" class="orange"/><text x="112" y="574" text-anchor="middle" class="t">逾期信息</text>
+  <rect x="185" y="545" width="105" height="48" rx="6" class="red"/><text x="237" y="574" text-anchor="middle" class="t">债项违约</text><path d="M112 518V545" class="arrow"/><path d="M165 569H185" class="arrow"/>
+  <rect x="60" y="625" width="230" height="100" rx="6" class="band"/><text x="75" y="653" class="sh">核心业务关系</text><text x="75" y="680" class="s">客户 → 额度/评级 → 申请 → 合同 → 债项</text><text x="75" y="703" class="s">合同关联多个押品；债项产生逾期与违约</text>
+
+  <rect x="335" y="110" width="245" height="650" rx="8" class="box"/><text x="355" y="145" class="h">二、月末批量加工</text><text x="355" y="168" class="sub">每月月末统一加工与发布</text>
+  <g class="t" text-anchor="middle"><rect x="370" y="200" width="175" height="48" rx="6" class="blue"/><text x="457" y="229">上游数据接收</text><rect x="370" y="275" width="175" height="48" rx="6" class="blue"/><text x="457" y="304">批次登记与清单核验</text><rect x="370" y="350" width="175" height="48" rx="6" class="orange"/><text x="457" y="379">数据质量检查</text><rect x="370" y="425" width="175" height="48" rx="6" class="orange"/><text x="457" y="454">客户/合同/债项校验</text><rect x="370" y="500" width="175" height="48" rx="6" class="green"/><text x="457" y="529">客户与债项月末快照</text><rect x="370" y="575" width="175" height="48" rx="6" class="green"/><text x="457" y="604">正式发布与锁定</text><rect x="370" y="650" width="175" height="48" rx="6" class="blue"/><text x="457" y="679">重算与版本管理</text></g>
+  <path d="M457 248V275M457 323V350M457 398V425M457 473V500M457 548V575M457 623V650" class="arrow"/>
+  <path d="M310 430H335" class="arrow"/>
+
+  <rect x="605" y="110" width="380" height="650" rx="8" class="box"/><text x="625" y="145" class="h">三、组合风险计量与分析</text>
+  <rect x="700" y="265" width="190" height="95" rx="8" class="blue"/><text x="795" y="305" text-anchor="middle" class="h">风险敞口</text><text x="795" y="333" text-anchor="middle" class="s">组合风险计量核心</text>
+  <rect x="630" y="190" width="135" height="52" rx="6" class="orange"/><text x="697" y="220" text-anchor="middle" class="t">PD 违约概率</text><rect x="825" y="190" width="135" height="52" rx="6" class="orange"/><text x="892" y="220" text-anchor="middle" class="t">LGD 损失率</text>
+  <rect x="630" y="390" width="135" height="52" rx="6" class="green"/><text x="697" y="420" text-anchor="middle" class="t">EAD 风险暴露</text><rect x="825" y="390" width="135" height="52" rx="6" class="green"/><text x="892" y="420" text-anchor="middle" class="t">EL 预期损失</text>
+  <path d="M730 242L765 265M860 242L825 265M730 390L765 360M860 390L825 360" class="arrow"/>
+  <g class="t" text-anchor="middle"><rect x="630" y="485" width="145" height="48" rx="6" class="box"/><text x="702" y="514">评级迁徙</text><rect x="810" y="485" width="145" height="48" rx="6" class="red"/><text x="882" y="514">逾期与违约</text><rect x="630" y="555" width="145" height="48" rx="6" class="box"/><text x="702" y="584">押品覆盖</text><rect x="810" y="555" width="145" height="48" rx="6" class="box"/><text x="882" y="584">集中度分析</text><rect x="630" y="625" width="325" height="48" rx="6" class="blue"/><text x="792" y="654">跨月变化归因：规模、PD、LGD、结构</text></g>
+  <rect x="630" y="700" width="325" height="38" rx="5" class="band"/><text x="792" y="724" text-anchor="middle" class="s">组合 → 行业 → 集团 → 客户 → 合同 → 债项</text><path d="M580 430H605" class="arrow"/>
+
+  <rect x="1010" y="110" width="275" height="650" rx="8" class="box"/><text x="1030" y="145" class="h">四、组合管理与处置</text>
+  <text x="1030" y="185" class="sh">组合管理</text><g class="t"><rect x="1030" y="205" width="235" height="42" rx="6" class="blue"/><text x="1045" y="231">行业/产品/机构/集团集中度</text><rect x="1030" y="260" width="112" height="42" rx="6" class="green"/><text x="1046" y="286">组合限额</text><rect x="1153" y="260" width="112" height="42" rx="6" class="orange"/><text x="1166" y="286">下月占用预测</text><rect x="1030" y="315" width="112" height="42" rx="6" class="red"/><text x="1044" y="341">预警与超限</text><rect x="1153" y="315" width="112" height="42" rx="6" class="orange"/><text x="1170" y="341">压力测试</text><rect x="1030" y="370" width="235" height="42" rx="6" class="blue"/><text x="1060" y="396">模型回溯、校准与生命周期</text></g>
+  <text x="1030" y="455" class="sh">预警处置闭环</text>
+  <g class="s" text-anchor="middle"><rect x="1030" y="475" width="100" height="40" rx="20" class="orange"/><text x="1080" y="500">风险识别</text><rect x="1160" y="475" width="100" height="40" rx="20" class="red"/><text x="1210" y="500">预警案件</text><rect x="1160" y="540" width="100" height="40" rx="20" class="orange"/><text x="1210" y="565">整改任务</text><rect x="1030" y="540" width="100" height="40" rx="20" class="green"/><text x="1080" y="565">处置复核</text><rect x="1030" y="605" width="100" height="40" rx="20" class="blue"/><text x="1080" y="630">效果评价</text><rect x="1160" y="605" width="100" height="40" rx="20" class="blue"/><text x="1210" y="630">规则优化</text></g>
+  <path d="M1130 495H1160M1210 515V540M1160 560H1130M1080 580V605M1130 625H1160M1210 605V515" class="arrow"/>
+  <rect x="1030" y="680" width="235" height="48" rx="6" class="band"/><text x="1147" y="700" text-anchor="middle" class="s">自动关联风险台账并回写状态</text><text x="1147" y="719" text-anchor="middle" class="s">形成识别、处置、评价、优化闭环</text><path d="M985 430H1010" class="arrow"/>
+
+  <rect x="1310" y="110" width="250" height="650" rx="8" class="box"/><text x="1330" y="145" class="h">五、管理输出</text>
+  <g class="t" text-anchor="middle"><rect x="1335" y="190" width="200" height="55" rx="6" class="blue"/><text x="1435" y="222">组合风险驾驶舱</text><rect x="1335" y="270" width="200" height="55" rx="6" class="blue"/><text x="1435" y="302">月末组合变动报告</text><rect x="1335" y="350" width="200" height="55" rx="6" class="green"/><text x="1435" y="382">客户 360 风险画像</text><rect x="1335" y="430" width="200" height="55" rx="6" class="green"/><text x="1435" y="462">集团客户风险视图</text><rect x="1335" y="510" width="200" height="55" rx="6" class="orange"/><text x="1435" y="542">管理报告与监管报表</text><rect x="1335" y="590" width="200" height="55" rx="6" class="orange"/><text x="1435" y="622">AI 智能分析与建议</text></g><path d="M1285 430H1310" class="arrow"/>
+  <rect x="1335" y="680" width="200" height="48" rx="6" class="band"/><text x="1435" y="701" text-anchor="middle" class="s">为管理层、风险经理、模型人员</text><text x="1435" y="720" text-anchor="middle" class="s">提供不同工作台与决策信息</text>
+
+  <rect x="40" y="780" width="1520" height="82" rx="8" fill="#edf4ff" stroke="#4d78b5" stroke-width="1.5"/>
+  <text x="65" y="811" class="h">六、AI 智能风险能力</text>
+  <g class="t" text-anchor="middle"><rect x="275" y="796" width="170" height="45" rx="6" class="blue"/><text x="360" y="824">自然语言智能查询</text><rect x="465" y="796" width="170" height="45" rx="6" class="blue"/><text x="550" y="824">客户与集团风险画像</text><rect x="655" y="796" width="170" height="45" rx="6" class="orange"/><text x="740" y="824">异常识别与风险预警</text><rect x="845" y="796" width="170" height="45" rx="6" class="orange"/><text x="930" y="824">跨月变化智能归因</text><rect x="1035" y="796" width="170" height="45" rx="6" class="green"/><text x="1120" y="824">处置建议与报告生成</text><rect x="1225" y="796" width="170" height="45" rx="6" class="green"/><text x="1310" y="824">外部大数据辅助分析</text></g>
+  <text x="1455" y="817" text-anchor="middle" class="s">全流程嵌入</text><text x="1455" y="837" text-anchor="middle" class="s">可解释、可追溯</text>
+
+  <rect x="40" y="885" width="490" height="70" rx="8" class="band"/><text x="285" y="916" text-anchor="middle" class="sh">数据质量与业务口径</text><text x="285" y="941" text-anchor="middle" class="s">完整性、唯一性、关联性、勾稽、整改与批次验收</text>
+  <rect x="555" y="885" width="490" height="70" rx="8" class="band"/><text x="800" y="916" text-anchor="middle" class="sh">模型生命周期与审计</text><text x="800" y="941" text-anchor="middle" class="s">模拟、审批、发布、回滚、监控、回溯与校准</text>
+  <rect x="1070" y="885" width="490" height="70" rx="8" class="band"/><text x="1315" y="916" text-anchor="middle" class="sh">权限、安全、合规与操作留痕</text><text x="1315" y="941" text-anchor="middle" class="s">分级授权、敏感数据保护、操作审计与责任追踪</text>
+</svg>

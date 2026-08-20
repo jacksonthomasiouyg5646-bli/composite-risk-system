@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.RiskPortfolioMapper">
+    <sql id="activeExposure">e.deleted_flag = 0 and e.exposure_status = 'ACTIVE'</sql>
+    <select id="getPortfolioSummary" resultType="map">
+        select count(*) as exposure_count, count(distinct customer_no) as customer_count, ifnull(sum(ead_amount),0) as ead_amount,
+               ifnull(sum(el_avg),0) as el_avg_amount, ifnull(sum(el_downturn),0) as el_downturn_amount
+        from corporate_risk_exposure e where <include refid="activeExposure"/>
+    </select>
+    <select id="listIndustryConcentration" resultType="map">
+        select ifnull(c.industry_name,'UNCLASSIFIED') as scope_code, ifnull(c.industry_name,'未分类') as scope_name,
+               count(*) as exposure_count, count(distinct e.customer_no) as customer_count, ifnull(sum(e.ead_amount),0) as ead_amount,
+               ifnull(sum(e.el_avg),0) as el_avg_amount, ifnull(sum(e.el_downturn),0) as el_downturn_amount
+        from corporate_risk_exposure e left join corporate_customer c on c.customer_no=e.customer_no and c.deleted_flag=0
+        where <include refid="activeExposure"/> group by ifnull(c.industry_name,'UNCLASSIFIED'), ifnull(c.industry_name,'未分类') order by ead_amount desc
+    </select>
+    <select id="listProductConcentration" resultType="map">
+        select e.product_type as scope_code, e.product_type as scope_name, count(*) as exposure_count,
+               count(distinct e.customer_no) as customer_count, ifnull(sum(e.ead_amount),0) as ead_amount,
+               ifnull(sum(e.el_avg),0) as el_avg_amount, ifnull(sum(e.el_downturn),0) as el_downturn_amount
+        from corporate_risk_exposure e where <include refid="activeExposure"/> group by e.product_type order by ead_amount desc
+    </select>
+    <select id="listOrganizationConcentration" resultType="map">
+        select ifnull(c.owner_org_name,'UNASSIGNED') as scope_code, ifnull(c.owner_org_name,'未分配机构') as scope_name,
+               count(*) as exposure_count, count(distinct e.customer_no) as customer_count, ifnull(sum(e.ead_amount),0) as ead_amount,
+               ifnull(sum(e.el_avg),0) as el_avg_amount, ifnull(sum(e.el_downturn),0) as el_downturn_amount
+        from corporate_risk_exposure e left join corporate_customer c on c.customer_no=e.customer_no and c.deleted_flag=0
+        where <include refid="activeExposure"/> group by ifnull(c.owner_org_name,'UNASSIGNED'), ifnull(c.owner_org_name,'未分配机构') order by ead_amount desc
+    </select>
+    <select id="listTopCustomerConcentration" resultType="map">
+        select e.customer_no, max(e.customer_name_snapshot) as customer_name, ifnull(sum(e.ead_amount),0) as ead_amount,
+               ifnull(sum(e.el_downturn),0) as el_downturn_amount, max(e.risk_level) as risk_level
+        from corporate_risk_exposure e where <include refid="activeExposure"/> group by e.customer_no order by ead_amount desc limit #{limit}
+    </select>
+    <select id="listPortfolioLimits" resultType="map">
+        select id, dimension_type, scope_code, scope_name, metric_code, limit_amount, warning_ratio, owner, status, effective_date, expiry_date, created_at, updated_at
+        from risk_portfolio_limit order by dimension_type, scope_name, metric_code
+    </select>
+    <insert id="insertPortfolioLimit" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_portfolio_limit (dimension_type,scope_code,scope_name,metric_code,limit_amount,warning_ratio,owner,status,effective_date,expiry_date)
+        values (#{dimension_type},#{scope_code},#{scope_name},#{metric_code},#{limit_amount},#{warning_ratio},#{owner},#{status},#{effective_date},#{expiry_date})
+    </insert>
+    <update id="updatePortfolioLimit">
+        update risk_portfolio_limit set limit_amount=#{body.limit_amount}, warning_ratio=#{body.warning_ratio}, owner=#{body.owner}, status=#{body.status}, expiry_date=#{body.expiry_date}
+        where id=#{id}
+    </update>
+    <insert id="upsertPortfolioLimitSnapshot" parameterType="map">
+        insert into risk_portfolio_limit_snapshot (limit_id,data_date,actual_amount,portfolio_total_amount,utilization_ratio,concentration_ratio,monitor_status,evidence_json,captured_by)
+        values (#{limit_id},#{data_date},#{actual_amount},#{portfolio_total_amount},#{utilization_ratio},#{concentration_ratio},#{monitor_status},#{evidence_json},#{captured_by})
+        on duplicate key update actual_amount=values(actual_amount),portfolio_total_amount=values(portfolio_total_amount),utilization_ratio=values(utilization_ratio),concentration_ratio=values(concentration_ratio),monitor_status=values(monitor_status),evidence_json=values(evidence_json),captured_by=values(captured_by),captured_at=current_timestamp
+    </insert>
+    <select id="listLatestLimitSnapshots" resultType="map">
+        select s.limit_id,s.data_date,s.actual_amount,s.portfolio_total_amount,s.utilization_ratio,s.concentration_ratio,s.monitor_status,s.captured_at
+        from risk_portfolio_limit_snapshot s join (select limit_id,max(data_date) as data_date from risk_portfolio_limit_snapshot group by limit_id) latest on latest.limit_id=s.limit_id and latest.data_date=s.data_date
+    </select>
+    <select id="getLatestPortfolioDataDate" resultType="string">select date_format(max(e.data_date),'%Y-%m-%d') from corporate_risk_exposure e where <include refid="activeExposure"/></select>
+    <sql id="backtestBase">
+        select ${segment} as segment_code, ${segment} as segment_name, count(*) as exposure_count,
+               ifnull(sum(dd.debt_no is not null),0) as default_count, ifnull(sum(e.ead_amount),0) as ead_amount,
+               case when sum(e.ead_amount)>0 then round(sum(e.ead_amount*e.pd)/sum(e.ead_amount),6) else 0 end as expected_pd,
+               case when count(*)>0 then round(sum(dd.debt_no is not null)/count(*),6) else 0 end as observed_default_rate,
+               case when sum(e.ead_amount)>0 then round(sum(e.ead_amount*e.lgd_avg)/sum(e.ead_amount),6) else 0 end as expected_lgd,
+               case when sum(case when dd.debt_no is not null then dd.default_exposure_amount else 0 end)>0 then round(sum(case when dd.debt_no is not null then dd.loss_amount else 0 end)/sum(case when dd.debt_no is not null then dd.default_exposure_amount else 0 end),6) else 0 end as observed_lgd,
+               ifnull(sum(case when dd.debt_no is not null then e.ead_amount else 0 end),0) as predicted_default_ead,
+               ifnull(sum(case when dd.debt_no is not null then dd.default_exposure_amount else 0 end),0) as observed_default_ead,
+               ifnull(sum(e.el_avg),0) as predicted_el, ifnull(sum(case when dd.debt_no is not null then dd.loss_amount else 0 end),0) as observed_loss
+        from corporate_risk_exposure e ${join}
+        left join corporate_debt_default dd on dd.debt_no=e.debt_no and dd.deleted_flag=0 and dd.default_status='ACTIVE'
+        where <include refid="activeExposure"/> group by ${segment} order by ead_amount desc
+    </sql>
+    <select id="listProductBacktestSegments" resultType="map"><include refid="backtestBase"><property name="segment" value="e.product_type"/><property name="join" value=""/></include></select>
+    <select id="listIndustryBacktestSegments" resultType="map"><include refid="backtestBase"><property name="segment" value="ifnull(c.industry_name,'UNCLASSIFIED')"/><property name="join" value="left join corporate_customer c on c.customer_no=e.customer_no and c.deleted_flag=0"/></include></select>
+    <insert id="insertBacktestRun" parameterType="map">
+        insert into risk_model_backtest_run (run_code,as_of_date,segment_type,segment_code,segment_name,exposure_count,default_count,ead_amount,expected_pd,observed_default_rate,expected_lgd,observed_lgd,predicted_default_ead,observed_default_ead,predicted_el,observed_loss,pd_bias,lgd_bias,ead_bias,calibration_status,recommendation,run_by)
+        values (#{run_code},#{as_of_date},#{segment_type},#{segment_code},#{segment_name},#{exposure_count},#{default_count},#{ead_amount},#{expected_pd},#{observed_default_rate},#{expected_lgd},#{observed_lgd},#{predicted_default_ead},#{observed_default_ead},#{predicted_el},#{observed_loss},#{pd_bias},#{lgd_bias},#{ead_bias},#{calibration_status},#{recommendation},#{run_by})
+    </insert>
+    <select id="getLatestBacktestRunCode" resultType="string">select run_code from risk_model_backtest_run order by created_at desc,id desc limit 1</select>
+    <select id="listLatestBacktestRuns" resultType="map">
+        select * from risk_model_backtest_run where run_code=(select run_code from risk_model_backtest_run order by created_at desc,id desc limit 1) order by segment_type,ead_amount desc
+    </select>
+    <select id="listClosedAlertEffectivenessBases" resultType="map">
+        select c.id as alert_case_id,c.customer_no,c.closed_at,c.risk_score as baseline_risk_score,c.closure_comment,
+               ifnull(max(e.lgd_downturn),0) as current_lgd_downturn
+        from risk_alert_case c left join corporate_risk_exposure e on e.customer_no=c.customer_no and e.deleted_flag=0 and e.exposure_status='ACTIVE'
+        where c.alert_state='RESOLVED' and c.closed_at is not null group by c.id,c.customer_no,c.closed_at,c.risk_score,c.closure_comment
+    </select>
+    <insert id="upsertAlertEffectiveness" parameterType="map">
+        insert into risk_alert_effectiveness_snapshot (alert_case_id,evaluation_date,evaluation_window_days,closed_at,baseline_risk_score,current_risk_score,score_delta,current_pd,current_lgd_downturn,overdue_count,debt_default_count,effectiveness_status,conclusion,evaluated_by)
+        values (#{alert_case_id},#{evaluation_date},#{evaluation_window_days},#{closed_at},#{baseline_risk_score},#{current_risk_score},#{score_delta},#{current_pd},#{current_lgd_downturn},#{overdue_count},#{debt_default_count},#{effectiveness_status},#{conclusion},#{evaluated_by})
+        on duplicate key update current_risk_score=values(current_risk_score),score_delta=values(score_delta),current_pd=values(current_pd),current_lgd_downturn=values(current_lgd_downturn),overdue_count=values(overdue_count),debt_default_count=values(debt_default_count),effectiveness_status=values(effectiveness_status),conclusion=values(conclusion),evaluated_by=values(evaluated_by)
+    </insert>
+    <select id="listLatestAlertEffectiveness" resultType="map">
+        select s.*,c.customer_no,c.priority,c.closure_comment from risk_alert_effectiveness_snapshot s join risk_alert_case c on c.id=s.alert_case_id
+        where s.evaluation_date=(select max(evaluation_date) from risk_alert_effectiveness_snapshot) order by s.effectiveness_status,s.score_delta
+    </select>
+
+    <select id="listLimitForecast" resultType="map">
+        select 'INDUSTRY' dimension_type,ifnull(c.industry_name,'UNCLASSIFIED') scope_code,
+               round(sum(a.apply_amount*0.35),2) reserved_amount,count(*) application_count
+        from corporate_credit_application a join corporate_customer c on c.customer_no=a.customer_no_snapshot and c.deleted_flag=0
+        where a.deleted_flag=0 and a.application_status='APPROVED' group by ifnull(c.industry_name,'UNCLASSIFIED')
+        union all
+        select 'PRODUCT',a.product_type,round(sum(a.apply_amount*0.35),2),count(*)
+        from corporate_credit_application a where a.deleted_flag=0 and a.application_status='APPROVED' group by a.product_type
+        union all
+        select 'ORGANIZATION',ifnull(c.owner_org_name,'UNASSIGNED'),round(sum(a.apply_amount*0.35),2),count(*)
+        from corporate_credit_application a join corporate_customer c on c.customer_no=a.customer_no_snapshot and c.deleted_flag=0
+        where a.deleted_flag=0 and a.application_status='APPROVED' group by ifnull(c.owner_org_name,'UNASSIGNED')
+    </select>
+
+    <select id="listStressScenarios" resultType="map">
+        select * from risk_stress_scenario_definition where status='ENABLED' order by id
+    </select>
+
+    <select id="findStressScenario" resultType="map">
+        select * from risk_stress_scenario_definition where scenario_code=#{scenarioCode} and status='ENABLED' limit 1
+    </select>
+
+    <select id="listStressSegments" resultType="map">
+        select ifnull(c.industry_name,'UNCLASSIFIED') segment_code,ifnull(c.industry_name,'未分类') segment_name,
+               count(*) exposure_count,count(distinct e.customer_no) customer_count,sum(e.ead_amount) base_ead,
+               sum(e.el_downturn) base_el,sum(e.collateral_value) collateral_value,
+               case when sum(e.ead_amount)&gt;0 then sum(e.ead_amount*e.pd)/sum(e.ead_amount) else 0 end weighted_pd,
+               case when sum(e.ead_amount)&gt;0 then sum(e.ead_amount*e.lgd_downturn)/sum(e.ead_amount) else 0 end weighted_lgd
+        from corporate_risk_exposure e left join corporate_customer c on c.customer_no=e.customer_no and c.deleted_flag=0
+        where <include refid="activeExposure"/> group by ifnull(c.industry_name,'UNCLASSIFIED'),ifnull(c.industry_name,'未分类') order by base_ead desc
+    </select>
+
+    <insert id="insertStressResult" parameterType="map">
+        insert into risk_portfolio_stress_result
+        (run_code,scenario_code,as_of_date,segment_type,segment_code,segment_name,base_ead,stressed_ead,base_el,stressed_el,
+         incremental_loss,stressed_pd,stressed_lgd,stressed_collateral,limit_breach_flag,run_by)
+        values (#{run_code},#{scenario_code},#{as_of_date},'INDUSTRY',#{segment_code},#{segment_name},#{base_ead},#{stressed_ead},
+         #{base_el},#{stressed_el},#{incremental_loss},#{stressed_pd},#{stressed_lgd},#{stressed_collateral},#{limit_breach_flag},#{run_by})
+    </insert>
+
+    <select id="listLatestStressResults" resultType="map">
+        select r.*,s.scenario_name,s.severity from risk_portfolio_stress_result r
+        join risk_stress_scenario_definition s on s.scenario_code=r.scenario_code
+        where r.run_code=(select run_code from risk_portfolio_stress_result order by created_at desc,id desc limit 1)
+        order by incremental_loss desc
+    </select>
+
+    <select id="listGroupRiskOverview" resultType="map">
+        select g.group_code,g.group_name,g.controller_customer_no,g.risk_appetite_amount,g.owner_org_name,
+               count(distinct m.customer_no) member_count,count(distinct e.exposure_no) exposure_count,
+               ifnull(sum(e.ead_amount),0) ead_amount,ifnull(sum(e.el_downturn),0) el_downturn_amount,
+               ifnull(sum(e.collateral_value),0) collateral_value,ifnull(sum(e.overdue_days&gt;0),0) overdue_count,
+               ifnull(sum(e.default_flag=1),0) default_count,
+               case when g.risk_appetite_amount&gt;0 then ifnull(sum(e.ead_amount),0)/g.risk_appetite_amount else 0 end appetite_utilization,
+               case when ifnull(sum(e.ead_amount),0)&gt;0 then ifnull(sum(e.collateral_value),0)/sum(e.ead_amount) else 0 end collateral_coverage
+        from risk_customer_group g join risk_customer_group_member m on m.group_id=g.id
+        left join corporate_risk_exposure e on e.customer_no=m.customer_no and e.deleted_flag=0 and e.exposure_status='ACTIVE'
+        where g.status='ACTIVE'
+        group by g.id,g.group_code,g.group_name,g.controller_customer_no,g.risk_appetite_amount,g.owner_org_name
+        order by ead_amount desc
+    </select>
+
+    <select id="listGroupMembers" resultType="map">
+        select g.group_code,m.customer_no,max(c.customer_name) customer_name,m.relationship_type,m.ownership_ratio,m.guarantee_flag,
+               count(distinct e.exposure_no) exposure_count,ifnull(sum(e.ead_amount),0) ead_amount,ifnull(sum(e.el_downturn),0) el_downturn_amount,
+               ifnull(sum(e.overdue_days&gt;0),0) overdue_count,ifnull(sum(e.default_flag=1),0) default_count,max(e.risk_level) risk_level
+        from risk_customer_group g join risk_customer_group_member m on m.group_id=g.id
+        left join corporate_customer c on c.customer_no=m.customer_no and c.deleted_flag=0
+        left join corporate_risk_exposure e on e.customer_no=m.customer_no and e.deleted_flag=0 and e.exposure_status='ACTIVE'
+        where g.group_code=#{groupCode}
+        group by g.group_code,m.customer_no,m.relationship_type,m.ownership_ratio,m.guarantee_flag order by ead_amount desc
+    </select>
+
+    <select id="listModelLifecycle" resultType="map">
+        select v.id,v.version_code,v.version_name,v.status,v.rule_count,v.created_by,v.submitted_by,v.approved_by,
+               v.simulated_at,v.submitted_at,v.approved_at,v.published_at,v.created_at,
+               (select count(*) from risk_model_approval_log l where l.version_id=v.id) approval_action_count,
+               case when v.simulated_at is null then '待模拟'
+                    when v.submitted_at is null then '待提交'
+                    when v.approved_at is null then '待审批'
+                    when v.published_at is null then '待发布'
+                    else '运行监控' end lifecycle_stage
+        from risk_model_version v order by v.created_at desc limit 20
+    </select>
+
+    <select id="getModelLifecycleSummary" resultType="map">
+        select count(*) version_total,sum(status='PUBLISHED') published_count,sum(status='DRAFT') draft_count,
+               sum(status='PENDING_APPROVAL') pending_approval_count,sum(status='APPROVED') approved_pending_publish_count,
+               (select count(*) from risk_model_backtest_run where run_code=(select run_code from risk_model_backtest_run order by created_at desc limit 1) and calibration_status='RECALIBRATE') recalibrate_segment_count,
+               (select average_risk_score from risk_model_monitor_snapshot order by snapshot_date desc,id desc limit 1) latest_average_risk_score,
+               (select snapshot_date from risk_model_monitor_snapshot order by snapshot_date desc,id desc limit 1) latest_monitor_date
+        from risk_model_version
+    </select>
+
+    <select id="getAlertEffectivenessMetrics" resultType="map">
+        select count(*) evaluated_count,sum(effectiveness_status='EFFECTIVE') effective_count,
+               sum(effectiveness_status='PARTIAL') partial_count,sum(effectiveness_status='INEFFECTIVE') ineffective_count,
+               sum(effectiveness_status='OBSERVING') observing_count,
+               case when count(*)&gt;0 then round(sum(effectiveness_status='EFFECTIVE')/count(*),6) else 0 end effective_rate,
+               case when count(*)&gt;0 then round(sum(effectiveness_status in ('EFFECTIVE','PARTIAL'))/count(*),6) else 0 end improvement_rate,
+               case when count(*)&gt;0 then round(avg(baseline_risk_score-current_risk_score),2) else 0 end average_score_improvement,
+               case when count(*)&gt;0 then round(sum(effectiveness_status='INEFFECTIVE')/count(*),6) else 0 end ineffective_rate
+        from risk_alert_effectiveness_snapshot
+        where evaluation_date=(select max(evaluation_date) from risk_alert_effectiveness_snapshot)
+    </select>
+
+    <select id="getWorkbenchPreference" resultType="map">
+        select username,workspace_role,default_tab,density_mode,visible_modules_json,updated_at
+        from risk_user_workbench_preference where username=#{username}
+    </select>
+
+    <insert id="upsertWorkbenchPreference" parameterType="map">
+        insert into risk_user_workbench_preference
+        (username,workspace_role,default_tab,density_mode,visible_modules_json,updated_by)
+        values (#{username},#{workspace_role},#{default_tab},#{density_mode},#{visible_modules_json},#{updated_by})
+        on duplicate key update workspace_role=values(workspace_role),default_tab=values(default_tab),density_mode=values(density_mode),
+          visible_modules_json=values(visible_modules_json),updated_by=values(updated_by),updated_at=current_timestamp
+    </insert>
+</mapper>

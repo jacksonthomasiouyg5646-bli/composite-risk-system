@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.system.mapper.RiskScoringRuleMapper">
+
+    <select id="listEnabledRules" resultType="map">
+        select id, rule_code, rule_name, metric_key, operator_type, threshold_value, effect_type, score_value,
+               risk_tag, reason_template, enabled, sort_order
+        from risk_scoring_rule
+        where enabled = 1
+        order by sort_order, id
+    </select>
+
+    <select id="listRules" resultType="map">
+        select id, rule_code, rule_name, metric_key, operator_type, threshold_value, effect_type, score_value,
+               risk_tag, reason_template, enabled, sort_order, created_at, updated_at
+        from risk_scoring_rule
+        <if test="keyword != null and keyword != ''">
+            where rule_code like concat('%', #{keyword}, '%')
+               or rule_name like concat('%', #{keyword}, '%')
+               or metric_key like concat('%', #{keyword}, '%')
+               or ifnull(risk_tag, '') like concat('%', #{keyword}, '%')
+        </if>
+        order by sort_order, id
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countRules" resultType="long">
+        select count(*) from risk_scoring_rule
+        <if test="keyword != null and keyword != ''">
+            where rule_code like concat('%', #{keyword}, '%')
+               or rule_name like concat('%', #{keyword}, '%')
+               or metric_key like concat('%', #{keyword}, '%')
+               or ifnull(risk_tag, '') like concat('%', #{keyword}, '%')
+        </if>
+    </select>
+
+    <select id="getRule" resultType="map">
+        select id, rule_code, rule_name, metric_key, operator_type, threshold_value, effect_type, score_value,
+               risk_tag, reason_template, enabled, sort_order, created_at, updated_at
+        from risk_scoring_rule
+        where id = #{id}
+    </select>
+
+    <insert id="insertRule" parameterType="map" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_scoring_rule
+          (rule_code, rule_name, metric_key, operator_type, threshold_value, effect_type, score_value, risk_tag, reason_template, enabled, sort_order)
+        values
+          (#{rule_code}, #{rule_name}, #{metric_key}, #{operator_type}, #{threshold_value}, #{effect_type}, #{score_value}, #{risk_tag}, #{reason_template}, #{enabled}, #{sort_order})
+    </insert>
+
+    <update id="updateRule">
+        update risk_scoring_rule
+        <set>
+            <if test="body.rule_code != null">rule_code = #{body.rule_code},</if>
+            <if test="body.rule_name != null">rule_name = #{body.rule_name},</if>
+            <if test="body.metric_key != null">metric_key = #{body.metric_key},</if>
+            <if test="body.operator_type != null">operator_type = #{body.operator_type},</if>
+            <if test="body.threshold_value != null">threshold_value = #{body.threshold_value},</if>
+            <if test="body.effect_type != null">effect_type = #{body.effect_type},</if>
+            <if test="body.score_value != null">score_value = #{body.score_value},</if>
+            <if test="body.risk_tag != null">risk_tag = #{body.risk_tag},</if>
+            <if test="body.reason_template != null">reason_template = #{body.reason_template},</if>
+            <if test="body.enabled != null">enabled = #{body.enabled},</if>
+            <if test="body.sort_order != null">sort_order = #{body.sort_order},</if>
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteRule">delete from risk_scoring_rule where id = #{id}</delete>
+</mapper>

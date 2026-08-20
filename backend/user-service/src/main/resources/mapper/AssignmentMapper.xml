@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.usermanagement.user.mapper.AssignmentMapper">
+    <select id="findRoleIdsByUserId" resultType="long">
+        select role_id from sys_user_role where user_id = #{userId}
+    </select>
+
+    <delete id="deleteUserRoles">
+        delete from sys_user_role where user_id = #{userId}
+    </delete>
+
+    <insert id="insertUserRole">
+        insert into sys_user_role(user_id, role_id) values (#{userId}, #{roleId})
+    </insert>
+
+    <select id="findPermissionIdsByRoleId" resultType="long">
+        select permission_id from sys_role_permission where role_id = #{roleId}
+    </select>
+
+    <delete id="deleteRolePermissions">
+        delete from sys_role_permission where role_id = #{roleId}
+    </delete>
+
+    <insert id="insertRolePermission">
+        insert into sys_role_permission(role_id, permission_id) values (#{roleId}, #{permissionId})
+    </insert>
+</mapper>

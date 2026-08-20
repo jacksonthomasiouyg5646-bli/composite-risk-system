@@ -26,6 +26,11 @@ public class CompositeRiskDashboardController {
         return ApiResponse.ok(compositeRiskDashboardService.getOverview());
     }
 
+    @GetMapping("/customers/{customerNo}/scoring-explanation")
+    public ApiResponse<Map<String, Object>> getCustomerScoringExplanation(@PathVariable String customerNo) {
+        return ApiResponse.ok(compositeRiskDashboardService.getCustomerScoringExplanation(customerNo));
+    }
+
     @RequirePermission("risk:treat")
     @PostMapping("/alerts/{customerNo}/treatment")
     public ApiResponse<Map<String, Object>> createTreatment(@PathVariable String customerNo) {

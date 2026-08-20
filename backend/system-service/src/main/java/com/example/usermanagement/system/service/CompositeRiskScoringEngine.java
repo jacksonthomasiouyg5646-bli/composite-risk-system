@@ -68,6 +68,67 @@ public class CompositeRiskScoringEngine {
         return result;
     }
 
+    public Map<String, Object> explain(Map<String, Object> feature, List<Map<String, Object>> rules) {
+        Map<String, Object> result = score(feature, rules);
+        int score = BASE_SCORE;
+        Set<String> additiveMetrics = new HashSet<>();
+        List<Map<String, Object>> factors = new ArrayList<>();
+
+        for (Map<String, Object> rule : rules) {
+            String metric = text(rule.get("metric_key"));
+            BigDecimal metricValue = decimal(feature.get(metric));
+            BigDecimal threshold = decimal(rule.get("threshold_value"));
+            String operator = text(rule.get("operator_type"));
+            String effect = text(rule.get("effect_type"));
+            boolean hit = metricValue != null && matches(metricValue, threshold, operator);
+            boolean duplicateAdditive = hit && "ADD".equals(effect) && !additiveMetrics.add(metric);
+            int scoreValue = integer(rule.get("score_value"));
+            int contribution = 0;
+            if (hit && !duplicateAdditive) {
+                if ("FLOOR".equals(effect)) {
+                    contribution = Math.max(0, scoreValue - score);
+                    score = Math.max(score, scoreValue);
+                } else {
+                    contribution = scoreValue;
+                    score += scoreValue;
+                }
+                score = Math.min(score, 100);
+            }
+
+            Map<String, Object> factor = new LinkedHashMap<>();
+            factor.put("rule_code", rule.get("rule_code"));
+            factor.put("rule_name", rule.get("rule_name"));
+            factor.put("risk_tag", rule.get("risk_tag"));
+            factor.put("metric_key", metric);
+            factor.put("metric_value", metricValue);
+            factor.put("metric_display", displayMetricValue(metric, metricValue));
+            factor.put("operator_type", operator);
+            factor.put("operator_label", operatorLabel(operator));
+            factor.put("threshold_value", threshold);
+            factor.put("threshold_display", displayMetricValue(metric, threshold));
+            factor.put("effect_type", effect);
+            factor.put("score_value", scoreValue);
+            factor.put("hit", hit);
+            factor.put("ignored", duplicateAdditive);
+            factor.put("contribution", contribution);
+            factor.put("running_score", score);
+            factor.put("reason", explainRuleReason(rule, metric, metricValue, threshold, hit, duplicateAdditive));
+            factors.add(factor);
+        }
+
+        int riskScore = integer(result.get("risk_score"));
+        result.put("base_score", BASE_SCORE);
+        result.put("factors", factors);
+        result.put("forecast_boost", integer(result.get("forecast_score")) - riskScore);
+        result.put("forecast_factors", forecastFactors(feature, riskScore));
+        result.put("formula_notes", List.of(
+                "基准分为 " + BASE_SCORE + " 分，命中 ADD 规则累加分值，同一指标 ADD 规则只取首次命中，避免重复加分。",
+                "FLOOR 规则用于重大风险兜底：命中后将当前分数至少抬升到规则分值。",
+                "30 日预测分 = 当前风险评分 + 预测加分，预测加分最高 20 分，总分封顶 100 分。"
+        ));
+        return result;
+    }
+
     private int forecastBoost(Map<String, Object> feature, int score) {
         if (score >= 85) {
             return 0;
@@ -87,6 +148,33 @@ public class CompositeRiskScoringEngine {
             boost += 5;
         }
         return Math.min(boost, 20);
+    }
+
+    private List<Map<String, Object>> forecastFactors(Map<String, Object> feature, int score) {
+        if (score >= 85) {
+            return List.of(forecastFactor("极高风险封顶", "risk_score", score, ">= 85", 0, true));
+        }
+        List<Map<String, Object>> factors = new ArrayList<>();
+        factors.add(forecastFactor("存在逾期记录", "overdue_count", integer(feature.get("overdue_count")), "> 0", 8, integer(feature.get("overdue_count")) > 0));
+        BigDecimal maxPd = decimalOrZero(feature.get("max_pd"));
+        factors.add(forecastFactor("PD 不低于 5%", "max_pd", displayMetricValue("max_pd", maxPd), ">= 5.00%", 6, maxPd.compareTo(new BigDecimal("0.050000")) >= 0));
+        BigDecimal utilizationRate = decimalOrZero(feature.get("utilization_rate"));
+        factors.add(forecastFactor("额度使用率不低于 90%", "utilization_rate", displayMetricValue("utilization_rate", utilizationRate), ">= 90.00%", 4, utilizationRate.compareTo(new BigDecimal("0.900000")) >= 0));
+        BigDecimal coverageRate = decimal(feature.get("coverage_rate"));
+        factors.add(forecastFactor("押品覆盖率低于 50%", "coverage_rate", displayMetricValue("coverage_rate", coverageRate), "< 50.00%", 5, coverageRate != null && coverageRate.compareTo(new BigDecimal("0.500000")) < 0));
+        return factors;
+    }
+
+    private Map<String, Object> forecastFactor(String name, String metric, Object value, String threshold, int scoreValue, boolean hit) {
+        Map<String, Object> factor = new LinkedHashMap<>();
+        factor.put("factor_name", name);
+        factor.put("metric_key", metric);
+        factor.put("metric_value", value);
+        factor.put("threshold", threshold);
+        factor.put("score_value", scoreValue);
+        factor.put("hit", hit);
+        factor.put("contribution", hit ? scoreValue : 0);
+        return factor;
     }
 
     private boolean matches(BigDecimal value, BigDecimal threshold, String operator) {
@@ -143,6 +231,36 @@ public class CompositeRiskScoringEngine {
             return value.multiply(new BigDecimal("100")).setScale(2, RoundingMode.HALF_UP) + "%";
         }
         return value.stripTrailingZeros().toPlainString();
+    }
+
+    private String displayMetricValue(String metric, BigDecimal value) {
+        if (value == null) return "-";
+        return displayMetric(metric, value);
+    }
+
+    private String operatorLabel(String operator) {
+        return switch (operator) {
+            case "GT" -> ">";
+            case "GTE" -> ">=";
+            case "LT" -> "<";
+            case "LTE" -> "<=";
+            case "EQ" -> "=";
+            default -> operator;
+        };
+    }
+
+    private String explainRuleReason(Map<String, Object> rule, String metric, BigDecimal metricValue, BigDecimal threshold, boolean hit, boolean duplicateAdditive) {
+        if (duplicateAdditive) {
+            return "已命中，但同一指标 ADD 规则已计分，本规则仅作为证据展示。";
+        }
+        String actual = displayMetricValue(metric, metricValue);
+        String expected = displayMetricValue(metric, threshold);
+        String description = text(rule.get("reason_template"));
+        if (hit && !description.isBlank()) {
+            return description.replace("{value}", actual);
+        }
+        return hit ? "命中：当前值 " + actual + " " + operatorLabel(text(rule.get("operator_type"))) + " 阈值 " + expected
+                : "未命中：当前值 " + actual + "，阈值 " + operatorLabel(text(rule.get("operator_type"))) + " " + expected;
     }
 
     private BigDecimal decimal(Object value) {

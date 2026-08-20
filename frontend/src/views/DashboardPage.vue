@@ -15,7 +15,26 @@
 
     <div class="metric-grid">
       <div v-for="item in metrics" :key="item.label" class="metric-item" :class="item.tone">
-        <span>{{ item.label }}</span>
+        <div class="metric-title">
+          <span>{{ item.label }}</span>
+          <el-popover placement="top" width="300" trigger="hover">
+            <template #reference>
+              <el-button class="metric-info" :icon="InfoFilled" text circle size="small" :aria-label="`${item.label}口径说明`" />
+            </template>
+            <div class="metric-popover">
+              <strong>{{ item.label }}</strong>
+              <p>{{ item.definition }}</p>
+              <dl>
+                <dt>数据来源</dt>
+                <dd>{{ item.source }}</dd>
+                <dt>计算口径</dt>
+                <dd>{{ item.formula }}</dd>
+                <dt>刷新频率</dt>
+                <dd>{{ item.frequency }}</dd>
+              </dl>
+            </div>
+          </el-popover>
+        </div>
         <strong :title="item.fullValue || item.value" :class="{ compact: item.compact }">{{ item.value }}</strong>
         <small>{{ item.detail }}</small>
       </div>
@@ -55,9 +74,10 @@
           <el-table-column label="风险证据" min-width="245" show-overflow-tooltip>
             <template #default="{ row }">{{ row.risk_signals || '-' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="176" fixed="right">
+          <el-table-column label="操作" width="240" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openCustomer(row)">客户 360</el-button>
+              <el-button link type="success" @click="openScoring(row)">评分拆解</el-button>
               <el-button
                 v-if="canCreateTreatment"
                 link
@@ -142,6 +162,73 @@
       </div>
     </section>
 
+    <el-drawer v-model="scoringVisible" size="min(760px, 100%)" :with-header="false" class="customer-drawer scoring-drawer">
+      <div class="drawer-header">
+        <div>
+          <span>组合评分拆解</span>
+          <h2>{{ scoringDetail?.customer_name || selectedScoringAlert?.customer_name || '-' }}</h2>
+          <small>{{ scoringDetail?.customer_no || selectedScoringAlert?.customer_no || '-' }}</small>
+        </div>
+        <el-button :icon="Close" circle @click="scoringVisible = false" />
+      </div>
+
+      <div v-loading="scoringLoading" class="drawer-body">
+        <template v-if="scoringDetail">
+          <section class="drawer-risk-summary">
+            <div>
+              <span>当前评分</span>
+              <strong :class="riskClass(scoringDetail.risk_level)">{{ scoringDetail.risk_score }}</strong>
+            </div>
+            <div>
+              <span>30日预测</span>
+              <strong :class="riskClass(scoringDetail.forecast_level)">{{ scoringDetail.forecast_score }}</strong>
+            </div>
+            <div>
+              <span>命中规则</span>
+              <strong>{{ hitFactors.length }} / {{ scoringDetail.rule_count || scoringFactors.length }}</strong>
+            </div>
+          </section>
+
+          <p class="drawer-conclusion">
+            {{ scoringDetail.risk_level }} · {{ scoringDetail.forecast_change }} · 基准分 {{ scoringDetail.base_score }}，预测加分 {{ scoringDetail.forecast_boost }}
+          </p>
+
+          <section class="explain-section">
+            <h3>命中因子</h3>
+            <el-table :data="hitFactors" size="small" empty-text="暂无命中规则">
+              <el-table-column prop="risk_tag" label="因子" min-width="120" show-overflow-tooltip />
+              <el-table-column prop="metric_display" label="当前值" width="100" />
+              <el-table-column label="阈值" width="120">
+                <template #default="{ row }">{{ row.operator_label }} {{ row.threshold_display }}</template>
+              </el-table-column>
+              <el-table-column label="贡献" width="82" align="right">
+                <template #default="{ row }">+{{ row.contribution }}</template>
+              </el-table-column>
+              <el-table-column prop="reason" label="解释" min-width="210" show-overflow-tooltip />
+            </el-table>
+          </section>
+
+          <section class="explain-section">
+            <h3>30日预测因子</h3>
+            <div class="forecast-factor-list">
+              <div v-for="item in scoringDetail.forecast_factors || []" :key="item.factor_name" :class="{ hit: item.hit }">
+                <span>{{ item.factor_name }}</span>
+                <small>{{ item.metric_value }} / {{ item.threshold }}</small>
+                <b>+{{ item.contribution }}</b>
+              </div>
+            </div>
+          </section>
+
+          <section class="explain-section">
+            <h3>评分公式说明</h3>
+            <ul>
+              <li v-for="note in scoringDetail.formula_notes || []" :key="note">{{ note }}</li>
+            </ul>
+          </section>
+        </template>
+      </div>
+    </el-drawer>
+
     <el-drawer v-model="customerVisible" size="min(860px, 100%)" :with-header="false" class="customer-drawer">
       <div class="drawer-header">
         <div>
@@ -216,7 +303,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { ArrowRight, Close, Refresh, Search } from '@element-plus/icons-vue'
+import { ArrowRight, Close, InfoFilled, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import http from '../api/http'
@@ -226,14 +313,64 @@ const router = useRouter()
 const auth = useAuthStore()
 const loading = ref(false)
 const customerLoading = ref(false)
+const scoringLoading = ref(false)
 const creatingCustomerNo = ref('')
 const customerVisible = ref(false)
+const scoringVisible = ref(false)
 const selectedAlert = ref(null)
+const selectedScoringAlert = ref(null)
 const customerAnalysis = ref(null)
+const scoringDetail = ref(null)
 const overview = ref({ summary: {}, alerts: [], warning_trend: [], industry_distribution: [] })
 
 const alerts = computed(() => overview.value.alerts || [])
 const canCreateTreatment = computed(() => auth.hasPermission('risk:treat'))
+const scoringFactors = computed(() => scoringDetail.value?.factors || [])
+const hitFactors = computed(() => scoringFactors.value.filter((item) => item.hit && !item.ignored))
+const metricGlossary = {
+  监测客户: {
+    definition: '纳入组合风险驾驶舱监测范围的信贷域有效客户数量。',
+    source: 'risk customer feature 视图 / 数据库实时聚合',
+    formula: '去重 customer_no 后统计客户总数',
+    frequency: '页面刷新时实时读取'
+  },
+  极高风险: {
+    definition: '当前组合风险评分达到 P1 处置阈值的客户。',
+    source: '评分规则表 + 客户风险特征',
+    formula: 'risk_score ≥ 85 的客户数',
+    frequency: '页面刷新时实时计算'
+  },
+  高风险: {
+    definition: '当前组合风险评分达到 P2 跟踪阈值但未进入 P1 的客户。',
+    source: '评分规则表 + 客户风险特征',
+    formula: '65 ≤ risk_score < 85 的客户数',
+    frequency: '页面刷新时实时计算'
+  },
+  预警敞口: {
+    definition: '已触发组合预警客户对应的风险暴露余额。',
+    source: '客户风险特征中的 EAD 字段',
+    formula: 'risk_score ≥ 45 客户的 ead_amount_total 求和',
+    frequency: '页面刷新时实时计算'
+  },
+  待办处置: {
+    definition: '风险整改计划中仍未关闭的待处理任务。',
+    source: '风险处置计划表',
+    formula: '状态非关闭/完成的处置计划数量',
+    frequency: '页面刷新时实时统计'
+  },
+  '30天风险上迁': {
+    definition: '30 日预测风险等级高于当前等级的客户。',
+    source: '当前评分 + 预测因子',
+    formula: 'forecast_level 排名高于 risk_level 的客户数',
+    frequency: '页面刷新时实时计算'
+  },
+  行业集中度: {
+    definition: '预测高风险敞口中，最高行业敞口占全部预测高风险敞口的比例。',
+    source: '客户行业、EAD 与预测评分',
+    formula: 'top_industry_high_risk_ead / all_high_risk_ead',
+    frequency: '页面刷新时实时计算'
+  }
+}
 const generatedAtText = computed(() => {
   const value = overview.value.generated_at
   if (!value) return '实时组合预警'
@@ -256,7 +393,7 @@ const metrics = computed(() => {
     { label: '待办处置', value: formatInteger(summary.open_treatment_count), detail: '风险整改计划', tone: 'success' },
     { label: '30天风险上迁', value: formatInteger(summary.forecast_upgrade_count), detail: `预测高风险 ${formatInteger(summary.forecast_high_risk_count)} 个`, tone: 'warning' },
     { label: '行业集中度', value: formatPercent(summary.top_industry_concentration), detail: summary.top_industry_name || '-', tone: 'attention' }
-  ]
+  ].map((item) => ({ ...metricGlossary[item.label], ...item }))
 })
 const industryDistribution = computed(() => {
   const rows = overview.value.industry_distribution || []
@@ -299,6 +436,18 @@ async function openCustomer(alert) {
     })
   } finally {
     customerLoading.value = false
+  }
+}
+
+async function openScoring(alert) {
+  selectedScoringAlert.value = alert
+  scoringDetail.value = null
+  scoringVisible.value = true
+  scoringLoading.value = true
+  try {
+    scoringDetail.value = await http.get(`/api/risks/composite-dashboard/customers/${encodeURIComponent(alert.customer_no)}/scoring-explanation`)
+  } finally {
+    scoringLoading.value = false
   }
 }
 
@@ -447,6 +596,55 @@ function formatPercent(value) {
 }
 
 .metric-item strong.compact { font-size: clamp(19px, 1.55vw, 25px); }
+
+.metric-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.metric-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-info {
+  flex: 0 0 auto;
+  color: #94a3b8;
+}
+
+.metric-popover strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #1f2937;
+}
+
+.metric-popover p {
+  margin: 0 0 10px;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.metric-popover dl {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 6px 10px;
+  margin: 0;
+  color: #475569;
+  font-size: 12px;
+}
+
+.metric-popover dt {
+  color: #64748b;
+}
+
+.metric-popover dd {
+  margin: 0;
+}
 
 .metric-item.critical { border-top-color: #dc2626; }
 .metric-item.warning { border-top-color: #d97706; }
@@ -747,6 +945,71 @@ function formatPercent(value) {
 .timeline-section :deep(.el-timeline-item__content) { color: #475569; font-size: 13px; line-height: 1.55; }
 .timeline-section :deep(.el-timeline-item__content strong) { color: #1f2937; }
 .timeline-section :deep(.el-timeline-item__content p) { margin: 4px 0 0; }
+
+.scoring-drawer .drawer-risk-summary strong.risk-extreme,
+.scoring-drawer .drawer-risk-summary strong.risk-high {
+  color: #dc2626;
+}
+
+.scoring-drawer .drawer-risk-summary strong.risk-medium {
+  color: #d97706;
+}
+
+.explain-section {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #dce3ec;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.explain-section h3 {
+  margin: 0 0 12px;
+  color: #1f2937;
+  font-size: 16px;
+}
+
+.forecast-factor-list {
+  display: grid;
+  gap: 8px;
+}
+
+.forecast-factor-list div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 12px;
+  padding: 10px 12px;
+  border: 1px solid #e8edf3;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.forecast-factor-list div.hit {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.forecast-factor-list span {
+  color: #1f2937;
+  font-weight: 700;
+}
+
+.forecast-factor-list small {
+  color: #64748b;
+}
+
+.forecast-factor-list b {
+  grid-row: span 2;
+  align-self: center;
+  color: #d97706;
+}
+
+.explain-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #475569;
+  line-height: 1.7;
+}
 
 @media (max-width: 1280px) {
   .metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }

@@ -10,5 +10,7 @@ public interface CompositeRiskDashboardService {
 
     Map<String, Object> getCustomerScoring(String customerNo);
 
+    Map<String, Object> getCustomerScoringExplanation(String customerNo);
+
     Map<String, Object> createTreatment(String customerNo);
 }

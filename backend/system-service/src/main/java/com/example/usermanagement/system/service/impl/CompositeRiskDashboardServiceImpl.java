@@ -71,6 +71,24 @@ public class CompositeRiskDashboardServiceImpl implements CompositeRiskDashboard
     }
 
     @Override
+    public Map<String, Object> getCustomerScoringExplanation(String customerNo) {
+        String normalizedCustomerNo = customerNo == null ? "" : customerNo.trim();
+        if (normalizedCustomerNo.isEmpty()) {
+            throw new IllegalArgumentException("瀹㈡埛缂栧彿涓嶈兘涓虹┖");
+        }
+        Map<String, Object> feature = mapper.findRiskFeatureByCustomerNo(normalizedCustomerNo);
+        if (feature == null) {
+            throw new IllegalArgumentException("鏈壘鍒板鎴烽闄╂暟鎹?");
+        }
+        List<Map<String, Object>> rules = riskScoringRuleMapper.listEnabledRules();
+        Map<String, Object> explanation = scoringEngine.explain(feature, rules);
+        explanation.put("analysis_model", "COMPOSITE_SCORING_FORECAST_RULE_V2");
+        explanation.put("generated_at", LocalDateTime.now());
+        explanation.put("rule_count", rules.size());
+        return explanation;
+    }
+
+    @Override
     @Transactional
     public Map<String, Object> createTreatment(String customerNo) {
         String normalizedCustomerNo = customerNo == null ? "" : customerNo.trim();

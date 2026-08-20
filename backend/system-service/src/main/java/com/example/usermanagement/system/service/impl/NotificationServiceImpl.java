@@ -61,10 +61,10 @@ public class NotificationServiceImpl extends AbstractSystemCrudService {
 
     @Override
     protected void clean(Map<String, Object> body) {
-        super.clean(body);
         body.remove("recipients");
         body.remove("target_email");
         body.remove("email");
+        super.clean(body);
     }
 
     private void publishMailIfNeeded(Map<String, Object> notification, Map<String, Object> sourceBody) {

@@ -2,6 +2,7 @@ package com.example.usermanagement.common.web;
 
 import com.example.usermanagement.common.api.ApiResponse;
 import com.example.usermanagement.common.api.PageResult;
+import com.example.usermanagement.common.service.CrudInputGuard;
 import com.example.usermanagement.common.service.CrudService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,6 +31,7 @@ public abstract class CrudControllerSupport {
 
     @GetMapping("/{id}")
     public ApiResponse<Map<String, Object>> get(@PathVariable("id") Long id) {
+        CrudInputGuard.requirePositiveId(id);
         return ApiResponse.ok(service.get(id));
     }
 
@@ -40,11 +42,13 @@ public abstract class CrudControllerSupport {
 
     @PutMapping("/{id}")
     public ApiResponse<Map<String, Object>> update(@PathVariable("id") Long id, @RequestBody Map<String, Object> body) {
+        CrudInputGuard.requirePositiveId(id);
         return ApiResponse.ok(service.update(id, body));
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable("id") Long id) {
+        CrudInputGuard.requirePositiveId(id);
         service.delete(id);
         return ApiResponse.ok();
     }

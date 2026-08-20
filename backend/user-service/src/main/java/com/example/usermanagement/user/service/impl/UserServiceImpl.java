@@ -39,6 +39,7 @@ public class UserServiceImpl extends AbstractUserCrudService {
     @Override
     public Map<String, Object> create(Map<String, Object> body) {
         Object password = body.remove("password");
+        body.remove("password_hash");
         body.put("password_hash", passwordHashService.encode(password == null ? null : String.valueOf(password)));
         return super.create(body);
     }
@@ -46,6 +47,7 @@ public class UserServiceImpl extends AbstractUserCrudService {
     @Override
     public Map<String, Object> update(Long id, Map<String, Object> body) {
         Object password = body.remove("password");
+        body.remove("password_hash");
         if (password != null && !String.valueOf(password).isBlank()) {
             body.put("password_hash", passwordHashService.encode(String.valueOf(password)));
         }

@@ -1,6 +1,7 @@
 package com.example.usermanagement.system.service.impl;
 
 import com.example.usermanagement.common.api.PageResult;
+import com.example.usermanagement.common.service.CrudInputGuard;
 import com.example.usermanagement.common.service.CrudService;
 import com.example.usermanagement.system.mapper.RiskAlertSubscriptionMapper;
 import com.example.usermanagement.system.service.CompositeRiskDashboardService;
@@ -10,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -22,6 +24,9 @@ public class RiskAlertSubscriptionServiceImpl implements RiskAlertSubscriptionSe
     private static final Logger log = LoggerFactory.getLogger(RiskAlertSubscriptionServiceImpl.class);
     private static final Set<String> CHANNELS = Set.of("SYSTEM", "EMAIL");
     private static final Set<String> TARGET_TYPES = Set.of("ALL", "USER");
+    private static final Set<String> EDITABLE_FIELDS = Set.of(
+            "subscription_code", "subscription_name", "channel", "target_type", "recipients", "enabled"
+    );
 
     private final RiskAlertSubscriptionMapper mapper;
     private final CompositeRiskDashboardService compositeRiskDashboardService;
@@ -39,12 +44,14 @@ public class RiskAlertSubscriptionServiceImpl implements RiskAlertSubscriptionSe
 
     @Override
     public PageResult<Map<String, Object>> list(int page, int size, String keyword) {
-        int safePage = Math.max(page, 1);
-        int safeSize = Math.min(Math.max(size, 1), 100);
-        return new PageResult<>(mapper.listSubscriptions(keyword, safeSize, (safePage - 1) * safeSize), mapper.countSubscriptions(keyword), safePage, safeSize);
+        int safePage = CrudInputGuard.safePage(page);
+        int safeSize = CrudInputGuard.safeSize(size);
+        int offset = CrudInputGuard.safeOffset(safePage, safeSize);
+        return new PageResult<>(mapper.listSubscriptions(keyword, safeSize, offset), mapper.countSubscriptions(keyword), safePage, safeSize);
     }
 
     @Override
+    @Transactional
     public Map<String, Object> create(Map<String, Object> body) {
         Map<String, Object> subscription = normalize(body, true);
         mapper.insertSubscription(subscription);
@@ -52,7 +59,9 @@ public class RiskAlertSubscriptionServiceImpl implements RiskAlertSubscriptionSe
     }
 
     @Override
+    @Transactional
     public Map<String, Object> update(Long id, Map<String, Object> body) {
+        CrudInputGuard.requirePositiveId(id);
         if (mapper.getSubscription(id) == null) {
             throw new IllegalArgumentException("预警订阅不存在");
         }
@@ -61,7 +70,9 @@ public class RiskAlertSubscriptionServiceImpl implements RiskAlertSubscriptionSe
     }
 
     @Override
+    @Transactional
     public void delete(Long id) {
+        CrudInputGuard.requirePositiveId(id);
         if (mapper.getSubscription(id) == null) {
             throw new IllegalArgumentException("预警订阅不存在");
         }
@@ -69,7 +80,9 @@ public class RiskAlertSubscriptionServiceImpl implements RiskAlertSubscriptionSe
     }
 
     @Override
+    @Transactional
     public Map<String, Object> dispatch(Long id) {
+        CrudInputGuard.requirePositiveId(id);
         Map<String, Object> subscription = mapper.getSubscription(id);
         if (subscription == null) {
             throw new IllegalArgumentException("预警订阅不存在");
@@ -124,6 +137,7 @@ public class RiskAlertSubscriptionServiceImpl implements RiskAlertSubscriptionSe
             required(subscription, "subscription_code");
             required(subscription, "subscription_name");
         }
+        CrudInputGuard.sanitizeBody(subscription, EDITABLE_FIELDS);
         subscription.put("frequency", "DAILY");
         if (creating || subscription.containsKey("channel")) {
             String channel = value(subscription.get("channel"), "SYSTEM").toUpperCase();

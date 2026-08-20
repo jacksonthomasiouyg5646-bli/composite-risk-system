@@ -1,9 +1,11 @@
 package com.example.usermanagement.system.service.impl;
 
 import com.example.usermanagement.common.api.PageResult;
+import com.example.usermanagement.common.service.CrudInputGuard;
 import com.example.usermanagement.system.mapper.RiskScoringRuleMapper;
 import com.example.usermanagement.system.service.RiskScoringRuleService;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
@@ -18,6 +20,10 @@ public class RiskScoringRuleServiceImpl implements RiskScoringRuleService {
     );
     private static final Set<String> OPERATORS = Set.of("GT", "GTE", "LT", "LTE", "EQ");
     private static final Set<String> EFFECTS = Set.of("ADD", "FLOOR");
+    private static final Set<String> EDITABLE_FIELDS = Set.of(
+            "rule_code", "rule_name", "metric_key", "operator_type", "threshold_value",
+            "score_value", "effect_type", "enabled", "sort_order", "description"
+    );
 
     private final RiskScoringRuleMapper mapper;
 
@@ -27,13 +33,14 @@ public class RiskScoringRuleServiceImpl implements RiskScoringRuleService {
 
     @Override
     public PageResult<Map<String, Object>> list(int page, int size, String keyword) {
-        int safePage = Math.max(page, 1);
-        int safeSize = Math.min(Math.max(size, 1), 100);
-        int offset = (safePage - 1) * safeSize;
+        int safePage = CrudInputGuard.safePage(page);
+        int safeSize = CrudInputGuard.safeSize(size);
+        int offset = CrudInputGuard.safeOffset(safePage, safeSize);
         return new PageResult<>(mapper.listRules(keyword, safeSize, offset), mapper.countRules(keyword), safePage, safeSize);
     }
 
     @Override
+    @Transactional
     public Map<String, Object> create(Map<String, Object> body) {
         Map<String, Object> rule = normalize(body, true);
         mapper.insertRule(rule);
@@ -41,7 +48,9 @@ public class RiskScoringRuleServiceImpl implements RiskScoringRuleService {
     }
 
     @Override
+    @Transactional
     public Map<String, Object> update(Long id, Map<String, Object> body) {
+        CrudInputGuard.requirePositiveId(id);
         if (mapper.getRule(id) == null) {
             throw new IllegalArgumentException("评分规则不存在");
         }
@@ -50,7 +59,9 @@ public class RiskScoringRuleServiceImpl implements RiskScoringRuleService {
     }
 
     @Override
+    @Transactional
     public void delete(Long id) {
+        CrudInputGuard.requirePositiveId(id);
         if (mapper.getRule(id) == null) {
             throw new IllegalArgumentException("评分规则不存在");
         }
@@ -63,6 +74,7 @@ public class RiskScoringRuleServiceImpl implements RiskScoringRuleService {
             required(rule, "rule_code");
             required(rule, "rule_name");
         }
+        CrudInputGuard.sanitizeBody(rule, EDITABLE_FIELDS);
         if (rule.containsKey("metric_key")) {
             String metric = text(rule.get("metric_key")).toLowerCase();
             if (!METRICS.contains(metric)) {

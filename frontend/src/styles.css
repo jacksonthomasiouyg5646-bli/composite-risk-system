@@ -19,6 +19,14 @@
 
 * { box-sizing: border-box; }
 
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -55,8 +63,15 @@ button, input, textarea { font: inherit; }
 .login-button, .full-width { width: 100%; }
 .default-account { margin: 18px 0 0; font-size: 13px; text-align: center; }
 
-.app-shell { min-height: 100vh; }
+.app-shell {
+  width: 100%;
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+}
 .sidebar {
+  flex: 0 0 244px;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -85,6 +100,14 @@ button, input, textarea { font: inherit; }
 .brand-copy strong { color: #fff; font-size: 16px; font-weight: 650; white-space: nowrap; }
 .brand-copy span { color: #a9bacb; font-size: 11px; }
 .risk-navigation { flex: 1; overflow-y: auto; padding: 10px 8px 14px; }
+.risk-navigation {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.risk-navigation::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
 .side-menu { border-right: 0; background: transparent; }
 .side-menu .el-menu-item {
   height: 42px;
@@ -118,15 +141,16 @@ button, input, textarea { font: inherit; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #34b39a; box-shadow: 0 0 0 3px rgba(52, 179, 154, 0.15); }
 
 .topbar {
+  flex: 0 0 68px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   height: 68px;
   padding: 0 24px;
   background: rgba(255, 255, 255, 0.96);
   border-bottom: 1px solid var(--risk-line);
 }
-.topbar-context { display: grid; gap: 2px; min-width: 140px; }
+.topbar-context { display: none; gap: 2px; min-width: 140px; }
 .context-kicker { color: #718096; font-size: 10px; font-weight: 650; letter-spacing: .08em; }
 .page-title { color: var(--risk-ink); font-size: 17px; font-weight: 650; }
 .topbar-tools, .user-chip { display: flex; align-items: center; }
@@ -137,7 +161,17 @@ button, input, textarea { font: inherit; }
 .topbar .el-button.is-circle:hover { background: #edf3f8; color: var(--risk-primary); }
 .user-chip { gap: 7px; padding: 3px 8px 3px 4px; border: 1px solid var(--risk-line); border-radius: 18px; color: #334155; font-size: 13px; }
 .user-chip .el-avatar { background: #d9e9f4; color: #1c5e8f; font-weight: 700; }
-.content { padding: 20px 24px 28px; overflow: auto; }
+.app-shell > .el-container {
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+.content {
+  min-width: 0;
+  height: calc(100vh - 68px);
+  padding: 20px 24px 28px;
+  overflow: auto;
+}
 
 .toolbar { display: flex; gap: 10px; margin-bottom: 16px; }
 .search-input { width: 280px; }

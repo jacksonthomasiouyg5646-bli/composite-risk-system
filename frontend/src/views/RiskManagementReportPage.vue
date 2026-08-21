@@ -2,11 +2,21 @@
   <section class="report-page">
     <div class="page-toolbar">
       <div><h2>管理报表</h2><p>从机构、行业、产品和风险迁移四个视角汇总组合风险。</p></div>
-      <el-button :icon="Refresh" @click="load">刷新</el-button>
+      <div class="toolbar-actions">
+        <el-button :icon="Download" @click="exportReport">导出 CSV</el-button>
+        <el-button :icon="Refresh" @click="load">刷新</el-button>
+      </div>
     </div>
 
     <section class="summary-grid">
       <div v-for="item in summaries" :key="item.label" class="summary-card" :class="item.tone"><span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>{{ item.note }}</small></div>
+    </section>
+
+    <section class="executive-brief">
+      <article v-for="item in executiveBrief" :key="item.title" :class="item.tone">
+        <strong>{{ item.title }}</strong>
+        <span>{{ item.text }}</span>
+      </article>
     </section>
 
     <section class="report-panel">
@@ -53,7 +63,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { Download, Refresh } from '@element-plus/icons-vue'
 import http from '../api/http'
 
 const loading = ref(false)
@@ -78,11 +88,41 @@ const migrations = computed(() => {
     { label: '风险下迁', value: number(source.downgrade_count), tone: 'green' }
   ]
 })
+const executiveBrief = computed(() => {
+  const summary = report.value.summary || {}
+  return [
+    {
+      title: '管理层关注',
+      text: `当前预警客户 ${number(summary.warning_customer_count)} 个，极高风险 ${number(summary.extreme_risk_count)} 个，建议优先复核 P1 客户现金流和押品覆盖。`,
+      tone: Number(summary.extreme_risk_count || 0) > 0 ? 'danger' : 'blue'
+    },
+    {
+      title: '组合迁移',
+      text: `未来 30 天风险上迁 ${number(summary.forecast_upgrade_count)} 个，应纳入下周风险例会和客户经理跟踪清单。`,
+      tone: Number(summary.forecast_upgrade_count || 0) > 0 ? 'warning' : 'green'
+    },
+    {
+      title: '行业集中',
+      text: `最高集中行业为 ${summary.top_industry_name || '-'}，集中度 ${percent(summary.top_industry_concentration)}。`,
+      tone: Number(summary.top_industry_concentration || 0) >= 0.3 ? 'warning' : 'blue'
+    }
+  ]
+})
 
 onMounted(load)
 async function load() {
   loading.value = true
   try { report.value = await http.get('/api/risks/management-reports') } finally { loading.value = false }
+}
+async function exportReport() {
+  const response = await http.get('/api/risks/management-reports/export', { responseType: 'blob' })
+  const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `risk-management-report-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
 }
 function number(value) { return Number(value || 0) }
 function money(value) { return Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
@@ -90,8 +130,9 @@ function percent(value) { return `${(Number(value || 0) * 100).toFixed(2)}%` }
 </script>
 
 <style scoped>
-.report-page { display: grid; gap: 16px; }.page-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }h2, p { margin: 0; }h2 { color: #1f2937; font-size: 18px; font-weight: 650; }.page-toolbar p { color: #64748b; font-size: 13px; margin-top: 5px; }
+.report-page { display: grid; gap: 16px; }.page-toolbar, .toolbar-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }h2, p { margin: 0; }h2 { color: #1f2937; font-size: 18px; font-weight: 650; }.page-toolbar p { color: #64748b; font-size: 13px; margin-top: 5px; }
 .summary-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }.summary-card, .report-panel { border: 1px solid #dce3ec; border-radius: 8px; background: #fff; }.summary-card { display: grid; gap: 5px; padding: 13px; min-width: 0; }.summary-card span, .summary-card small { color: #64748b; font-size: 12px; }.summary-card strong { color: #1f2937; font-size: 22px; }.summary-card.danger strong { color: #b91c1c; }.summary-card.warning strong { color: #b45309; }.summary-card.blue strong { color: #1d4f7e; }
+.executive-brief { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }.executive-brief article { display: grid; gap: 7px; padding: 14px; border: 1px solid #dce3ec; border-left: 4px solid #2563eb; border-radius: 8px; background: #fff; }.executive-brief article.warning { border-left-color: #d97706; background: #fffbeb; }.executive-brief article.danger { border-left-color: #dc2626; background: #fff7f7; }.executive-brief article.green { border-left-color: #059669; }.executive-brief strong { color: #1f2937; font-size: 14px; }.executive-brief span { color: #64748b; font-size: 13px; line-height: 1.55; }
 .report-panel { padding: 0 16px 14px; }.migration-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 14px 0; }.migration-item { display: grid; gap: 6px; padding: 18px; border-left: 4px solid #6b8fb2; background: #f8fafc; }.migration-item span { color: #64748b; font-size: 13px; }.migration-item strong { color: #1f2937; font-size: 28px; }.migration-item.danger { border-color: #dc2626; }.migration-item.danger strong { color: #b91c1c; }.migration-item.green { border-color: #059669; }.migration-item.green strong { color: #047857; }
-@media (max-width: 1100px) { .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }@media (max-width: 680px) { .page-toolbar { align-items: flex-start; flex-direction: column; }.summary-grid, .migration-grid { grid-template-columns: 1fr; }.report-panel { padding: 0 10px 10px; } }
+@media (max-width: 1100px) { .summary-grid, .executive-brief { grid-template-columns: repeat(3, minmax(0, 1fr)); } }@media (max-width: 680px) { .page-toolbar { align-items: flex-start; flex-direction: column; }.toolbar-actions { width: 100%; }.toolbar-actions .el-button { flex: 1; }.summary-grid, .migration-grid, .executive-brief { grid-template-columns: 1fr; }.report-panel { padding: 0 10px 10px; } }
 </style>

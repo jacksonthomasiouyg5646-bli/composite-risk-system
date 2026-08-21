@@ -13,6 +13,22 @@
       </div>
     </header>
 
+    <section class="role-lens surface">
+      <div class="role-lens-title">
+        <div>
+          <h2>角色化工作视角</h2>
+          <span>{{ activeRoleLens.summary }}</span>
+        </div>
+        <el-segmented v-model="roleLens" :options="roleLensOptions" />
+      </div>
+      <div class="role-action-grid">
+        <article v-for="item in activeRoleLens.actions" :key="item.title" :class="item.tone">
+          <strong>{{ item.title }}</strong>
+          <span>{{ item.description }}</span>
+        </article>
+      </div>
+    </section>
+
     <div class="metric-grid">
       <div v-for="item in metrics" :key="item.label" class="metric-item" :class="item.tone">
         <div class="metric-title">
@@ -317,6 +333,7 @@ const scoringLoading = ref(false)
 const creatingCustomerNo = ref('')
 const customerVisible = ref(false)
 const scoringVisible = ref(false)
+const roleLens = ref('manager')
 const selectedAlert = ref(null)
 const selectedScoringAlert = ref(null)
 const customerAnalysis = ref(null)
@@ -325,6 +342,51 @@ const overview = ref({ summary: {}, alerts: [], warning_trend: [], industry_dist
 
 const alerts = computed(() => overview.value.alerts || [])
 const canCreateTreatment = computed(() => auth.hasPermission('risk:treat'))
+const roleLensOptions = [
+  { label: '管理层', value: 'manager' },
+  { label: '风险经理', value: 'risk' },
+  { label: '客户经理', value: 'rm' },
+  { label: '模型管理员', value: 'model' }
+]
+const activeRoleLens = computed(() => {
+  const summary = overview.value.summary || {}
+  const topAlert = alerts.value[0] || {}
+  const lenses = {
+    manager: {
+      summary: `关注组合敞口、行业集中和未来 30 天风险迁移；当前预警客户 ${formatInteger(summary.warning_customer_count)} 个。`,
+      actions: [
+        { title: '召开组合风险例会', description: `优先审议 ${formatInteger(summary.extreme_risk_count)} 个 P1 客户和 ${formatInteger(summary.forecast_upgrade_count)} 个风险上迁客户。`, tone: 'danger' },
+        { title: '检查行业集中', description: `${summary.top_industry_name || '-'} 集中度 ${formatPercent(summary.top_industry_concentration)}，必要时调整限额。`, tone: 'warning' },
+        { title: '导出管理报表', description: '进入管理报表页导出 CSV，用于日报、周报或风险委员会材料。', tone: 'blue' }
+      ]
+    },
+    risk: {
+      summary: `关注预警案件处置、SLA 和评分解释；当前待办处置 ${formatInteger(summary.open_treatment_count)} 个。`,
+      actions: [
+        { title: '处理最高优先级案件', description: topAlert.customer_no ? `先处理 ${topAlert.customer_no}，当前评分 ${formatInteger(topAlert.risk_score)}。` : '当前暂无重点案件。', tone: 'danger' },
+        { title: '批量分派处置', description: '进入预警处置中心，筛选 P1/P2 并批量开始处置。', tone: 'blue' },
+        { title: '复核评分证据', description: '在预警列表点击评分拆解，核对规则命中和预测因子。', tone: 'warning' }
+      ]
+    },
+    rm: {
+      summary: '关注名下客户、现金流复核、押品覆盖和客户沟通记录。',
+      actions: [
+        { title: '客户 360 核验', description: '打开客户 360，核对评级、逾期、违约、合同和押品时间轴。', tone: 'blue' },
+        { title: '补充处置结论', description: '完成现金流、还款来源和押品核验后提交处置结论。', tone: 'warning' },
+        { title: '更新客户资料', description: '若评级过期或主数据缺失，先修复数据再请求风险复核。', tone: 'green' }
+      ]
+    },
+    model: {
+      summary: `关注评分规则、模型版本、模拟影响和压力测试；当前模型 ${overview.value.analysis_model || '-' }。`,
+      actions: [
+        { title: '查看规则命中', description: '通过评分拆解确认每个客户的命中规则、贡献分和预测加分。', tone: 'blue' },
+        { title: '运行模拟审批', description: '模型治理页创建草稿、模拟影响、审批后再发布。', tone: 'warning' },
+        { title: '监控误报漏报', description: '结合处置效果评价和模型监控页观察命中率与稳定性。', tone: 'green' }
+      ]
+    }
+  }
+  return lenses[roleLens.value] || lenses.manager
+})
 const scoringFactors = computed(() => scoringDetail.value?.factors || [])
 const hitFactors = computed(() => scoringFactors.value.filter((item) => item.hit && !item.ignored))
 const metricGlossary = {
@@ -543,6 +605,62 @@ function formatPercent(value) {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.role-lens {
+  padding: 14px 16px;
+}
+
+.role-lens-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.role-lens-title h2 {
+  margin: 0;
+  color: #1f2937;
+  font-size: 16px;
+}
+
+.role-lens-title span {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.role-action-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.role-action-grid article {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #e8edf3;
+  border-left: 4px solid #2563eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.role-action-grid article.danger { border-left-color: #dc2626; background: #fff7f7; }
+.role-action-grid article.warning { border-left-color: #d97706; background: #fffbeb; }
+.role-action-grid article.green { border-left-color: #059669; background: #f0fdf4; }
+
+.role-action-grid strong {
+  color: #1f2937;
+  font-size: 14px;
+}
+
+.role-action-grid span {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .cockpit-header h1,
@@ -1019,6 +1137,7 @@ function formatPercent(value) {
 
 @media (max-width: 820px) {
   .metric-grid,
+  .role-action-grid,
   .side-stack,
   .workflow-steps,
   .migration-grid,
@@ -1026,7 +1145,8 @@ function formatPercent(value) {
   .drawer-risk-summary { grid-template-columns: 1fr; }
   .drawer-risk-summary div { border-right: 0; border-bottom: 1px solid #dce3ec; }
   .drawer-risk-summary div:last-child { border-bottom: 0; }
-  .cockpit-header { align-items: flex-start; flex-direction: column; }
+  .cockpit-header,
+  .role-lens-title { align-items: flex-start; flex-direction: column; }
   .cockpit-actions { width: 100%; }
   .workflow-steps div { min-height: 46px; }
 }

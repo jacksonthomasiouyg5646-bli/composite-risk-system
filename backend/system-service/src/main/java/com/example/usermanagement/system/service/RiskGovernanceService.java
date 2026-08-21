@@ -20,6 +20,8 @@ public interface RiskGovernanceService {
     Map<String, Object> refreshAlertCases();
     Map<String, Object> startAlertCase(String customerNo, String operator);
     Map<String, Object> closeAlertCase(String customerNo, String comment, String operator);
+    Map<String, Object> batchStartAlertCases(Map<String, Object> body, String operator);
+    Map<String, Object> batchCloseAlertCases(Map<String, Object> body, String operator);
     Map<String, Object> runStressTest(Map<String, Object> body, String operator);
     Map<String, Object> getRelationshipGraph(String customerNo);
 }

@@ -12,6 +12,14 @@
       <div><span>最近压力测试</span><strong>{{ latestStress.scenario_name || '-' }}</strong><small>{{ formatDate(latestStress.created_at) }}</small></div>
     </section>
 
+    <section class="governance-gates">
+      <article v-for="gate in governanceGates" :key="gate.title" :class="{ pass: gate.pass }">
+        <el-tag size="small" :type="gate.pass ? 'success' : 'warning'" effect="plain">{{ gate.pass ? '已满足' : '待完成' }}</el-tag>
+        <strong>{{ gate.title }}</strong>
+        <span>{{ gate.description }}</span>
+      </article>
+    </section>
+
     <section class="panel version-panel">
       <div class="panel-title"><div><h3>模型版本</h3><span>草稿必须完成模拟后方可提交审批</span></div></div>
       <el-table v-loading="loading" :data="data.versions || []" border max-height="350" @row-click="openVersion">
@@ -81,6 +89,32 @@ const ruleForm = reactive({ rule_code: '', threshold_value: 0, score_value: 0, e
 const published = computed(() => data.value.published_version || {})
 const latestStress = computed(() => (data.value.stress_test_runs || [])[0] || {})
 const simulation = computed(() => parseJson(selected.value?.simulation_summary))
+const governanceGates = computed(() => {
+  const version = selected.value || published.value || {}
+  const simulationSummary = parseJson(version.simulation_summary)
+  return [
+    {
+      title: '规则快照',
+      pass: Number(version.rule_count || 0) > 0,
+      description: `当前版本包含 ${number(version.rule_count)} 条评分规则。`
+    },
+    {
+      title: '模拟验证',
+      pass: !!simulationSummary || !!version.simulated_at,
+      description: simulationSummary ? `影响客户 ${number(simulationSummary.changed_customer_count)} 个，高风险变化 ${signed(simulationSummary.high_risk_delta)}。` : '提交审批前必须先完成客户组合影响模拟。'
+    },
+    {
+      title: '审批留痕',
+      pass: ['APPROVED', 'PUBLISHED', 'RETIRED'].includes(version.status),
+      description: `当前状态：${statusLabel(version.status)}。发布前需完成审批。`
+    },
+    {
+      title: '压力测试',
+      pass: !!latestStress.value.scenario_name,
+      description: latestStress.value.scenario_name ? `最近场景：${latestStress.value.scenario_name}` : '建议发布前至少完成一次压力测试。'
+    }
+  ]
+})
 
 onMounted(load)
 
@@ -112,6 +146,11 @@ h2 { color: #1f2937; font-size: 18px; font-weight: 650; }
 .published-strip > div:last-child { border-right: 0; }
 .published-strip span, .published-strip small { color: #64748b; font-size: 12px; }
 .published-strip strong { color: #1f2937; font-size: 18px; overflow-wrap: anywhere; }
+.governance-gates { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.governance-gates article { display: grid; gap: 7px; padding: 13px; border: 1px solid #fed7aa; border-radius: 8px; background: #fffbeb; }
+.governance-gates article.pass { border-color: #bbf7d0; background: #f0fdf4; }
+.governance-gates strong { color: #1f2937; font-size: 14px; }
+.governance-gates span { color: #64748b; font-size: 12px; line-height: 1.5; }
 .panel { padding: 16px; }
 .panel-title { margin-bottom: 13px; }
 .panel-title h3 { color: #334155; font-size: 15px; }
@@ -123,6 +162,6 @@ h2 { color: #1f2937; font-size: 18px; font-weight: 650; }
 .simulation-metrics strong, .stress-summary strong { color: #1f2937; font-size: 20px; }
 .danger { color: #c2413a !important; }
 .success { color: #087a65 !important; }
-@media (max-width: 1020px) { .published-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .selected-grid { grid-template-columns: 1fr; } }
-@media (max-width: 620px) { .page-toolbar, .panel-title { align-items: flex-start; flex-direction: column; } .toolbar-actions, .stress-actions { width: 100%; } .toolbar-actions .el-button, .stress-actions .el-button { flex: 1; } .published-strip, .simulation-metrics, .stress-summary { grid-template-columns: 1fr; } .published-strip > div, .simulation-metrics > div, .stress-summary > div { border-right: 0; border-bottom: 1px solid #e9eef4; } }
+@media (max-width: 1020px) { .published-strip, .governance-gates { grid-template-columns: repeat(2, minmax(0, 1fr)); } .selected-grid { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .page-toolbar, .panel-title { align-items: flex-start; flex-direction: column; } .toolbar-actions, .stress-actions { width: 100%; } .toolbar-actions .el-button, .stress-actions .el-button { flex: 1; } .published-strip, .governance-gates, .simulation-metrics, .stress-summary { grid-template-columns: 1fr; } .published-strip > div, .simulation-metrics > div, .stress-summary > div { border-right: 0; border-bottom: 1px solid #e9eef4; } }
 </style>

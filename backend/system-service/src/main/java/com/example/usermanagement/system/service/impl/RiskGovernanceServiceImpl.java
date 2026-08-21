@@ -302,6 +302,40 @@ public class RiskGovernanceServiceImpl implements RiskGovernanceService {
 
     @Override
     @Transactional
+    public Map<String, Object> batchStartAlertCases(Map<String, Object> body, String operator) {
+        List<String> customerNos = customerNos(body);
+        List<Map<String, Object>> results = new ArrayList<>();
+        List<Map<String, Object>> failures = new ArrayList<>();
+        for (String customerNo : customerNos) {
+            try {
+                results.add(startAlertCase(customerNo, operator));
+            } catch (RuntimeException ex) {
+                failures.add(Map.of("customer_no", customerNo, "message", ex.getMessage()));
+            }
+        }
+        return batchResult("START", results, failures);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> batchCloseAlertCases(Map<String, Object> body, String operator) {
+        String comment = value(body == null ? null : body.get("comment"), "");
+        if (comment.isBlank()) throw new IllegalArgumentException("批量关闭案件时必须填写统一处置结论");
+        List<String> customerNos = customerNos(body);
+        List<Map<String, Object>> results = new ArrayList<>();
+        List<Map<String, Object>> failures = new ArrayList<>();
+        for (String customerNo : customerNos) {
+            try {
+                results.add(closeAlertCase(customerNo, comment, operator));
+            } catch (RuntimeException ex) {
+                failures.add(Map.of("customer_no", customerNo, "message", ex.getMessage()));
+            }
+        }
+        return batchResult("CLOSE", results, failures);
+    }
+
+    @Override
+    @Transactional
     public Map<String, Object> runStressTest(Map<String, Object> body, String operator) {
         String scenarioCode = value(body == null ? null : body.get("scenario_code"), "INDUSTRY_DOWNTURN").toUpperCase();
         Map<String, Object> parameters = defaultStressParameters(scenarioCode, body);
@@ -724,6 +758,40 @@ public class RiskGovernanceServiceImpl implements RiskGovernanceService {
 
     private Map<String, Object> edge(String source, String target, String type) {
         return Map.of("source", source, "target", target, "type", type);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> customerNos(Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("customerNos");
+        if (raw == null) raw = body == null ? null : body.get("customer_nos");
+        if (!(raw instanceof List<?> list)) {
+            throw new IllegalArgumentException("批量操作必须提供 customerNos 数组");
+        }
+        List<String> customerNos = list.stream()
+                .map(item -> value(item, ""))
+                .filter(item -> !item.isBlank())
+                .distinct()
+                .limit(51)
+                .toList();
+        if (customerNos.isEmpty()) {
+            throw new IllegalArgumentException("批量操作客户不能为空");
+        }
+        if (customerNos.size() > 50) {
+            throw new IllegalArgumentException("单次批量操作最多支持 50 个客户");
+        }
+        return customerNos;
+    }
+
+    private Map<String, Object> batchResult(String action, List<Map<String, Object>> results, List<Map<String, Object>> failures) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("action", action);
+        result.put("success_count", results.size());
+        result.put("failure_count", failures.size());
+        result.put("results", results);
+        result.put("failures", failures);
+        result.put("summary", mapper.getAlertCaseSummary());
+        result.put("operated_at", LocalDateTime.now());
+        return result;
     }
 
     private void recordModelAction(Long versionId, String action, String decision, String operator, String comment) {

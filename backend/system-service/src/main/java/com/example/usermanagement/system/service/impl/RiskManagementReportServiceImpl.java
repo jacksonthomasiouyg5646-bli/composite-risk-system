@@ -40,6 +40,18 @@ public class RiskManagementReportServiceImpl implements RiskManagementReportServ
         return report;
     }
 
+    @Override
+    public String exportCsv() {
+        Map<String, Object> report = getReport();
+        StringBuilder csv = new StringBuilder().append('\uFEFF');
+        csv.append("section,name,customer_count,warning_customer_count,high_risk_count,amount,extra\n");
+        appendRows(csv, "organization", "owner_org_name", list(report.get("organization")), "warning_ead_amount", "forecast_upgrade_count");
+        appendRows(csv, "industry", "industry_name", list(report.get("industry")), "high_risk_ead_amount", "forecast_upgrade_count");
+        appendRows(csv, "product", "product_type", list(report.get("product")), "outstanding_amount", "debt_default_count");
+        appendRows(csv, "risk_migration", "risk_level", list(report.get("risk_migration")), "current_count", "upgrade_count");
+        return csv.toString();
+    }
+
     private List<Map<String, Object>> organizationReport(List<Map<String, Object>> scorings) {
         Map<String, Map<String, Object>> aggregates = new LinkedHashMap<>();
         for (Map<String, Object> row : scorings) {
@@ -72,6 +84,32 @@ public class RiskManagementReportServiceImpl implements RiskManagementReportServ
                         .comparingInt((Map<String, Object> row) -> integer(row.get("high_risk_count"))).reversed()
                         .thenComparing(row -> decimal(row.get("warning_ead_amount")), Comparator.reverseOrder()))
                 .toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> list(Object value) {
+        return value instanceof List<?> rows ? (List<Map<String, Object>>) rows : List.of();
+    }
+
+    private void appendRows(StringBuilder csv, String section, String nameKey, List<Map<String, Object>> rows, String amountKey, String extraKey) {
+        for (Map<String, Object> row : rows) {
+            csv.append(escape(section)).append(',')
+                    .append(escape(value(row.get(nameKey), "-"))).append(',')
+                    .append(integer(row.get("customer_count"))).append(',')
+                    .append(integer(row.get("warning_customer_count"))).append(',')
+                    .append(integer(row.get("high_risk_count"))).append(',')
+                    .append(escape(decimal(row.get(amountKey)).toPlainString())).append(',')
+                    .append(escape(String.valueOf(row.getOrDefault(extraKey, ""))))
+                    .append('\n');
+        }
+    }
+
+    private String escape(String value) {
+        String text = value == null ? "" : value;
+        if (text.contains(",") || text.contains("\"") || text.contains("\n")) {
+            return "\"" + text.replace("\"", "\"\"") + "\"";
+        }
+        return text;
     }
 
     private int integer(Object value) {

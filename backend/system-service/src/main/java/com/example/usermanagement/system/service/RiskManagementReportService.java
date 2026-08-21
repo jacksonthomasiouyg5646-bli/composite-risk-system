@@ -4,4 +4,6 @@ import java.util.Map;
 
 public interface RiskManagementReportService {
     Map<String, Object> getReport();
+
+    String exportCsv();
 }

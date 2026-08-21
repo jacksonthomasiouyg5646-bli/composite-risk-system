@@ -21,6 +21,13 @@
     </section>
 
     <section class="panel case-panel">
+      <div class="batch-bar">
+        <span>已选择 {{ selectedRows.length }} 个案件</span>
+        <div>
+          <el-button :disabled="!batchStartable.length" type="primary" plain @click="batchStart">批量开始处置</el-button>
+          <el-button :disabled="!selectedRows.length" type="success" plain @click="batchClose">批量关闭</el-button>
+        </div>
+      </div>
       <el-tabs v-model="state" @tab-change="load">
         <el-tab-pane label="全部" name="" />
         <el-tab-pane label="待处置" name="OPEN" />
@@ -28,7 +35,8 @@
         <el-tab-pane label="已逾期" name="OVERDUE" />
         <el-tab-pane label="已关闭" name="RESOLVED" />
       </el-tabs>
-      <el-table v-loading="loading" :data="rows" border max-height="calc(100vh - 330px)">
+      <el-table v-loading="loading" :data="rows" border max-height="calc(100vh - 370px)" row-key="customer_no" @selection-change="selectedRows = $event">
+        <el-table-column type="selection" width="44" />
         <el-table-column prop="priority" label="优先级" width="84"><template #default="{ row }"><el-tag size="small" :type="priorityType(row.priority)" effect="plain">{{ row.priority }}</el-tag></template></el-table-column>
         <el-table-column prop="customer_no" label="客户编号" min-width="145" show-overflow-tooltip />
         <el-table-column prop="customer_name" label="客户名称" min-width="155" show-overflow-tooltip />
@@ -37,7 +45,7 @@
         <el-table-column label="整改任务" min-width="118"><template #default="{ row }"><div v-if="row.treatment_plan_id" class="linked-cell"><el-tag size="small" :type="treatmentType(row.treatment_status)" effect="plain">{{ row.treatment_status }}</el-tag><small>{{ number(row.treatment_progress) }}%</small></div><span v-else class="muted">待同步</span></template></el-table-column>
         <el-table-column label="风险事件" min-width="100"><template #default="{ row }"><el-tag v-if="row.risk_event_id" size="small" :type="eventType(row.event_status)" effect="plain">{{ row.event_status }}</el-tag><span v-else class="muted">待同步</span></template></el-table-column>
         <el-table-column label="客户 KRI" min-width="115"><template #default="{ row }"><div v-if="row.risk_indicator_id" class="linked-cell"><el-tag size="small" :type="indicatorType(row.indicator_status)" effect="plain">{{ row.indicator_status }}</el-tag><small>{{ row.indicator_current_value }}</small></div><span v-else class="muted">待同步</span></template></el-table-column>
-        <el-table-column label="SLA 到期" min-width="140"><template #default="{ row }"><span :class="dueClass(row)">{{ formatDate(row.sla_due_at) }}</span></template></el-table-column>
+        <el-table-column label="SLA 到期" min-width="155"><template #default="{ row }"><span :class="dueClass(row)">{{ formatDate(row.sla_due_at) }}</span><small class="sla-hint">{{ slaHint(row) }}</small></template></el-table-column>
         <el-table-column prop="owner" label="责任人" min-width="100" show-overflow-tooltip />
         <el-table-column label="操作" width="145" fixed="right"><template #default="{ row }"><el-button v-if="['OPEN', 'OVERDUE'].includes(row.alert_state)" link type="primary" @click="start(row)">开始处置</el-button><el-button v-if="['OPEN', 'IN_PROGRESS', 'OVERDUE'].includes(row.alert_state)" link type="success" @click="close(row)">关闭案件</el-button></template></el-table-column>
       </el-table>
@@ -47,7 +55,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { AlarmClock, Refresh } from '@element-plus/icons-vue'
 import http from '../api/http'
@@ -55,11 +63,13 @@ import http from '../api/http'
 const loading = ref(false)
 const refreshing = ref(false)
 const rows = ref([])
+const selectedRows = ref([])
 const total = ref(0)
 const page = ref(1)
 const size = ref(20)
 const state = ref('')
 const summary = ref({})
+const batchStartable = computed(() => selectedRows.value.filter((row) => ['OPEN', 'OVERDUE'].includes(row.alert_state)))
 
 onMounted(refreshCases)
 
@@ -101,6 +111,33 @@ async function close(row) {
   await load()
 }
 
+async function batchStart() {
+  if (!batchStartable.value.length) return
+  const customerNos = batchStartable.value.map((row) => row.customer_no)
+  const result = await http.post('/api/risks/alert-cases/batch/start', { customerNos })
+  summary.value = result.summary || summary.value
+  ElMessage.success(`批量开始 ${result.success_count || 0} 个案件，失败 ${result.failure_count || 0} 个`)
+  selectedRows.value = []
+  await load()
+}
+
+async function batchClose() {
+  if (!selectedRows.value.length) return
+  const result = await ElMessageBox.prompt(`将关闭 ${selectedRows.value.length} 个案件，请填写统一处置结论`, '批量关闭案件', {
+    inputType: 'textarea',
+    inputPlaceholder: '例如：已完成现金流复核和客户经理确认，纳入后续跟踪。',
+    inputValidator: (value) => value?.trim() ? true : '必须填写处置结论'
+  })
+  const response = await http.post('/api/risks/alert-cases/batch/close', {
+    customerNos: selectedRows.value.map((row) => row.customer_no),
+    comment: result.value.trim()
+  })
+  summary.value = response.summary || summary.value
+  ElMessage.success(`批量关闭 ${response.success_count || 0} 个案件，失败 ${response.failure_count || 0} 个`)
+  selectedRows.value = []
+  await load()
+}
+
 function resize() { page.value = 1; load() }
 function number(value) { return Number(value || 0) }
 function formatDate(value) { return value ? String(value).replace('T', ' ').slice(0, 16) : '-' }
@@ -111,6 +148,15 @@ function treatmentType(value) { return ({ 已完成: 'success', 进行中: '', �
 function eventType(value) { return ({ 已复盘: 'success', 处理中: 'warning', 登记: 'info' })[value] || 'info' }
 function indicatorType(value) { return ({ 正常: 'success', 预警: 'warning', 超限: 'danger' })[value] || 'info' }
 function dueClass(row) { return row.alert_state === 'OVERDUE' ? 'overdue' : '' }
+function slaHint(row) {
+  if (!row.sla_due_at || row.alert_state === 'RESOLVED') return ''
+  const due = new Date(row.sla_due_at).getTime()
+  const hours = Math.round((due - Date.now()) / 3600000)
+  if (!Number.isFinite(hours)) return ''
+  if (hours < 0) return `逾期 ${Math.abs(hours)} 小时`
+  if (hours <= 24) return `${hours} 小时内到期`
+  return `剩余 ${Math.round(hours / 24)} 天`
+}
 </script>
 
 <style scoped>
@@ -128,8 +174,11 @@ h2 { color: #1f2937; font-size: 18px; font-weight: 650; }
 .case-summary .success strong { color: #087a65; }
 .case-summary .linked { color: #335d8f; }
 .case-panel { padding: 0 16px 14px; }
+.batch-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0 4px; color: #64748b; font-size: 13px; }
+.batch-bar > div { display: flex; gap: 8px; }
 .linked-cell { display: grid; gap: 3px; justify-items: start; }
 .linked-cell small, .muted { color: #64748b; font-size: 12px; }
+.sla-hint { display: block; margin-top: 3px; color: #94a3b8; font-size: 11px; }
 .pager { display: flex; justify-content: flex-end; padding-top: 14px; }
 @media (max-width: 1100px) { .case-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }.case-summary > div:nth-child(3n) { border-right: 0; }.case-summary > div:nth-child(-n + 3) { border-bottom: 1px solid #e9eef4; } }
 @media (max-width: 600px) { .page-toolbar { align-items: flex-start; flex-direction: column; }.toolbar-actions { width: 100%; }.toolbar-actions .el-button { flex: 1; }.case-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }.case-summary > div { border-right: 1px solid #e9eef4; border-bottom: 1px solid #e9eef4; }.case-summary > div:nth-child(2n) { border-right: 0; }.case-summary > div:nth-last-child(-n + 2) { border-bottom: 0; } }

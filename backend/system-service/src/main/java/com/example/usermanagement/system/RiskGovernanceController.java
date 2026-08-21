@@ -114,6 +114,18 @@ public class RiskGovernanceController {
         return ApiResponse.ok(riskGovernanceService.closeAlertCase(customerNo, text(body, "comment"), username(request)));
     }
 
+    @RequirePermission("risk:treat")
+    @PostMapping("/alert-cases/batch/start")
+    public ApiResponse<Map<String, Object>> batchStartAlertCases(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        return ApiResponse.ok(riskGovernanceService.batchStartAlertCases(body, username(request)));
+    }
+
+    @RequirePermission("risk:treat")
+    @PostMapping("/alert-cases/batch/close")
+    public ApiResponse<Map<String, Object>> batchCloseAlertCases(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        return ApiResponse.ok(riskGovernanceService.batchCloseAlertCases(body, username(request)));
+    }
+
     @PostMapping("/stress-tests")
     public ApiResponse<Map<String, Object>> runStressTest(@RequestBody(required = false) Map<String, Object> body, HttpServletRequest request) {
         return ApiResponse.ok(riskGovernanceService.runStressTest(body, username(request)));

@@ -17,6 +17,18 @@ public interface RiskGovernanceMapper {
 
     void upsertDataQualitySnapshot(Map<String, Object> body);
 
+    Map<String, Object> getIngestionSummary();
+
+    List<Map<String, Object>> listIngestionBatches(@Param("limit") int limit);
+
+    void insertIngestionBatch(Map<String, Object> body);
+
+    Map<String, Object> getPermissionAuditSummary();
+
+    List<Map<String, Object>> listRolePermissionMatrix();
+
+    List<Map<String, Object>> listSensitiveOperationLogs(@Param("limit") int limit);
+
     List<Map<String, Object>> listModelVersions(@Param("limit") int limit);
 
     Map<String, Object> getModelVersion(@Param("id") Long id);
@@ -60,6 +72,16 @@ public interface RiskGovernanceMapper {
     void startAlertCase(@Param("customerNo") String customerNo, @Param("operator") String operator, @Param("startedAt") LocalDateTime startedAt);
 
     void closeAlertCase(@Param("customerNo") String customerNo, @Param("comment") String comment, @Param("closedAt") LocalDateTime closedAt);
+
+    void updateAlertCaseWorkflow(@Param("customerNo") String customerNo, @Param("state") String state, @Param("operator") String operator,
+                                 @Param("comment") String comment, @Param("operatedAt") LocalDateTime operatedAt);
+
+    void escalateAlertCase(@Param("customerNo") String customerNo, @Param("comment") String comment, @Param("operator") String operator,
+                           @Param("operatedAt") LocalDateTime operatedAt);
+
+    void insertAlertCaseTimeline(Map<String, Object> body);
+
+    List<Map<String, Object>> listAlertCaseTimeline(@Param("customerNo") String customerNo);
 
     int escalateOverdueAlertCases(@Param("now") LocalDateTime now);
 

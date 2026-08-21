@@ -2,6 +2,7 @@ package com.example.usermanagement.system.service.impl;
 
 import com.example.usermanagement.common.api.PageResult;
 import com.example.usermanagement.system.mapper.RiskGovernanceMapper;
+import com.example.usermanagement.system.mapper.RiskIntelligenceMapper;
 import com.example.usermanagement.system.mapper.RiskScoringRuleMapper;
 import com.example.usermanagement.system.service.CompositeRiskDashboardService;
 import com.example.usermanagement.system.service.CompositeRiskScoringEngine;
@@ -34,6 +35,7 @@ public class RiskGovernanceServiceImpl implements RiskGovernanceService {
     private static final Set<String> EFFECTS = Set.of("ADD", "FLOOR");
 
     private final RiskGovernanceMapper mapper;
+    private final RiskIntelligenceMapper intelligenceMapper;
     private final RiskScoringRuleMapper riskScoringRuleMapper;
     private final CompositeRiskDashboardService compositeRiskDashboardService;
     private final CompositeRiskScoringEngine scoringEngine;
@@ -41,12 +43,14 @@ public class RiskGovernanceServiceImpl implements RiskGovernanceService {
 
     public RiskGovernanceServiceImpl(
             RiskGovernanceMapper mapper,
+            RiskIntelligenceMapper intelligenceMapper,
             RiskScoringRuleMapper riskScoringRuleMapper,
             CompositeRiskDashboardService compositeRiskDashboardService,
             CompositeRiskScoringEngine scoringEngine,
             ObjectMapper objectMapper
     ) {
         this.mapper = mapper;
+        this.intelligenceMapper = intelligenceMapper;
         this.riskScoringRuleMapper = riskScoringRuleMapper;
         this.compositeRiskDashboardService = compositeRiskDashboardService;
         this.scoringEngine = scoringEngine;
@@ -60,6 +64,9 @@ public class RiskGovernanceServiceImpl implements RiskGovernanceService {
         result.put("live", live);
         result.put("latest_snapshot", mapper.getLatestDataQualitySnapshot());
         result.put("lineage", mapper.listDataLineage());
+        result.put("ingestion_summary", mapper.getIngestionSummary());
+        result.put("ingestion_batches", mapper.listIngestionBatches(12));
+        result.put("audit", getAuditOverview());
         return result;
     }
 
@@ -79,6 +86,56 @@ public class RiskGovernanceServiceImpl implements RiskGovernanceService {
         mapper.upsertDataQualitySnapshot(snapshot);
         snapshot.put("checks", quality.get("checks"));
         return snapshot;
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> simulateDataIngestion(String operator) {
+        LocalDateTime now = LocalDateTime.now();
+        List<Map<String, Object>> batches = List.of(
+                ingestionBatch("EXT-CREDIT", "CreditProfile", "SUCCESS", 200, 196, 4, new BigDecimal("98.00"), now.minusMinutes(42), operator, "征信评分、逾期摘要、负面记录增量接入"),
+                ingestionBatch("EXT-BIZ", "BusinessRegistration", "SUCCESS", 200, 199, 1, new BigDecimal("99.50"), now.minusMinutes(35), operator, "工商状态、股权关系、经营异常清单接入"),
+                ingestionBatch("EXT-LAWSUIT", "JudicialCase", "WARNING", 120, 112, 8, new BigDecimal("93.33"), now.minusMinutes(28), operator, "司法涉诉和被执行信息接入，部分记录客户号待人工匹配"),
+                ingestionBatch("EXT-NEWS", "PublicOpinion", "SUCCESS", 80, 78, 2, new BigDecimal("97.50"), now.minusMinutes(16), operator, "公开舆情与重大负面事件摘要接入")
+        );
+        batches.forEach(mapper::insertIngestionBatch);
+
+        List<Map<String, Object>> scores = compositeRiskDashboardService.listCustomerScorings();
+        int logged = 0;
+        for (Map<String, Object> score : scores.stream().limit(24).toList()) {
+            Map<String, Object> log = new LinkedHashMap<>();
+            int riskScore = integer(score.get("risk_score"));
+            log.put("customer_no", score.get("customer_no"));
+            log.put("provider_name", "模拟外部风险数据平台");
+            log.put("query_status", logged % 11 == 0 ? "UNAVAILABLE" : "AVAILABLE");
+            log.put("data_available", logged % 11 == 0 ? 0 : 1);
+            log.put("external_risk_score", Math.min(100, Math.max(0, riskScore + (logged % 5 - 2) * 3)));
+            log.put("data_source", logged % 3 == 0 ? "司法涉诉" : logged % 3 == 1 ? "工商经营" : "征信摘要");
+            intelligenceMapper.insertExternalDataAccessLog(log);
+            logged++;
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("batch_count", batches.size());
+        result.put("external_log_count", logged);
+        result.put("ingestion_summary", mapper.getIngestionSummary());
+        result.put("ingestion_batches", mapper.listIngestionBatches(12));
+        result.put("simulated_at", now);
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> getAuditOverview() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("summary", mapper.getPermissionAuditSummary());
+        result.put("role_matrix", mapper.listRolePermissionMatrix());
+        result.put("sensitive_operations", mapper.listSensitiveOperationLogs(20));
+        result.put("audit_opinion", List.of(
+                "高敏操作已纳入 POST/PUT/DELETE 审计日志，覆盖模型发布、预警关闭、批量处置等路径。",
+                "管理员角色拥有全量权限，业务角色需按最小授权原则继续拆分为风控处置、模型治理、数据治理和审计查看。",
+                "建议生产环境开启日志归档和不可篡改存储，满足事后追溯和内控检查。"
+        ));
+        return result;
     }
 
     @Override
@@ -282,9 +339,10 @@ public class RiskGovernanceServiceImpl implements RiskGovernanceService {
     @Override
     @Transactional
     public Map<String, Object> startAlertCase(String customerNo, String operator) {
-        if (mapper.getAlertCase(customerNo) == null) throw new IllegalArgumentException("未找到预警案例");
+        Map<String, Object> before = requireAlertCase(customerNo);
         mapper.startAlertCase(customerNo, operator(operator), LocalDateTime.now());
         Map<String, Object> alertCase = mapper.getAlertCase(customerNo);
+        recordAlertTimeline(customerNo, "START", value(before.get("alert_state"), ""), value(alertCase.get("alert_state"), ""), operator, "开始处置预警案件");
         synchronizeAlertCase(alertCase, LocalDateTime.now());
         return alertCaseResult(alertCase);
     }
@@ -293,11 +351,52 @@ public class RiskGovernanceServiceImpl implements RiskGovernanceService {
     @Transactional
     public Map<String, Object> closeAlertCase(String customerNo, String comment, String operator) {
         if (value(comment, "").isBlank()) throw new IllegalArgumentException("关闭案例时必须填写处置结论");
-        if (mapper.getAlertCase(customerNo) == null) throw new IllegalArgumentException("未找到预警案例");
+        Map<String, Object> before = requireAlertCase(customerNo);
         mapper.closeAlertCase(customerNo, value(comment, ""), LocalDateTime.now());
         Map<String, Object> alertCase = mapper.getAlertCase(customerNo);
+        recordAlertTimeline(customerNo, "CLOSE_DIRECT", value(before.get("alert_state"), ""), value(alertCase.get("alert_state"), ""), operator, comment);
         synchronizeAlertCase(alertCase, LocalDateTime.now());
         return alertCaseResult(alertCase);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> submitAlertCaseReview(String customerNo, String comment, String operator) {
+        if (value(comment, "").isBlank()) throw new IllegalArgumentException("提交复核时必须填写处置说明");
+        return changeAlertWorkflow(customerNo, "SUBMIT_REVIEW", "PENDING_REVIEW", comment, operator);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> approveAlertCaseReview(String customerNo, String comment, String operator) {
+        if (value(comment, "").isBlank()) throw new IllegalArgumentException("复核通过时必须填写复核意见");
+        return changeAlertWorkflow(customerNo, "APPROVE_REVIEW", "RESOLVED", comment, operator);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> rejectAlertCaseReview(String customerNo, String comment, String operator) {
+        if (value(comment, "").isBlank()) throw new IllegalArgumentException("退回复核时必须填写退回原因");
+        return changeAlertWorkflow(customerNo, "REJECT_REVIEW", "REJECTED", comment, operator);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> escalateAlertCase(String customerNo, String comment, String operator) {
+        Map<String, Object> before = requireAlertCase(customerNo);
+        mapper.escalateAlertCase(customerNo, value(comment, "人工升级预警案件"), operator(operator), LocalDateTime.now());
+        Map<String, Object> alertCase = mapper.getAlertCase(customerNo);
+        recordAlertTimeline(customerNo, "ESCALATE", value(before.get("alert_state"), ""), value(alertCase.get("alert_state"), ""), operator, comment);
+        synchronizeAlertCase(alertCase, LocalDateTime.now());
+        return alertCaseResult(alertCase);
+    }
+
+    @Override
+    public Map<String, Object> getAlertCaseTimeline(String customerNo) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("case", requireAlertCase(customerNo));
+        result.put("timeline", mapper.listAlertCaseTimeline(customerNo));
+        return result;
     }
 
     @Override
@@ -646,6 +745,56 @@ public class RiskGovernanceServiceImpl implements RiskGovernanceService {
         result.put("issue_total", issueTotal);
         result.put("checks", checks);
         return result;
+    }
+
+    private Map<String, Object> ingestionBatch(String sourceSystem, String sourceEntity, String status,
+                                               int sourceCount, int acceptedCount, int rejectedCount,
+                                               BigDecimal qualityScore, LocalDateTime startedAt,
+                                               String operator, String remark) {
+        Map<String, Object> batch = new LinkedHashMap<>();
+        batch.put("batch_no", "ING-" + sourceSystem + "-" + startedAt.format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")));
+        batch.put("source_system", sourceSystem);
+        batch.put("source_entity", sourceEntity);
+        batch.put("batch_status", status);
+        batch.put("source_record_count", sourceCount);
+        batch.put("accepted_record_count", acceptedCount);
+        batch.put("rejected_record_count", rejectedCount);
+        batch.put("quality_score", qualityScore);
+        batch.put("started_at", startedAt);
+        batch.put("completed_at", startedAt.plusMinutes(3));
+        batch.put("operator", operator(operator));
+        batch.put("remark", remark);
+        return batch;
+    }
+
+    private Map<String, Object> changeAlertWorkflow(String customerNo, String action, String nextState, String comment, String operator) {
+        Map<String, Object> before = requireAlertCase(customerNo);
+        mapper.updateAlertCaseWorkflow(customerNo, nextState, operator(operator), value(comment, ""), LocalDateTime.now());
+        Map<String, Object> alertCase = mapper.getAlertCase(customerNo);
+        if (value(before.get("alert_state"), "").equals(value(alertCase.get("alert_state"), ""))) {
+            throw new IllegalArgumentException("当前案件状态不允许执行该闭环动作");
+        }
+        recordAlertTimeline(customerNo, action, value(before.get("alert_state"), ""), value(alertCase.get("alert_state"), ""), operator, comment);
+        synchronizeAlertCase(alertCase, LocalDateTime.now());
+        return alertCaseResult(alertCase);
+    }
+
+    private Map<String, Object> requireAlertCase(String customerNo) {
+        Map<String, Object> alertCase = mapper.getAlertCase(customerNo);
+        if (alertCase == null) throw new IllegalArgumentException("未找到预警案例");
+        return alertCase;
+    }
+
+    private void recordAlertTimeline(String customerNo, String action, String fromState, String toState, String operator, String comment) {
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("customer_no", customerNo);
+        event.put("action_type", action);
+        event.put("from_state", fromState);
+        event.put("to_state", toState);
+        event.put("operator", operator(operator));
+        event.put("comment", value(comment, ""));
+        event.put("created_at", LocalDateTime.now());
+        mapper.insertAlertCaseTimeline(event);
     }
 
     private Map<String, Object> ensurePublishedBaseline() {

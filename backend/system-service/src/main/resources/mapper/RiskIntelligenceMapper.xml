@@ -37,7 +37,9 @@
     <select id="listModelSnapshots" resultType="map">
         select snapshot_date, model_name, rule_count, customer_total, average_risk_score,
                extreme_risk_count, high_risk_count, warning_customer_count, forecast_upgrade_count,
-               external_query_count, external_available_count, external_unavailable_count, created_at
+               external_query_count, external_available_count, external_unavailable_count,
+               auc_value, ks_value, psi_value, precision_rate, recall_rate, false_alarm_rate, stability_status,
+               created_at
         from risk_model_monitor_snapshot
         order by snapshot_date desc, id desc
         limit #{limit}
@@ -47,11 +49,13 @@
         insert into risk_model_monitor_snapshot
           (snapshot_date, model_name, rule_count, customer_total, average_risk_score, extreme_risk_count,
            high_risk_count, warning_customer_count, forecast_upgrade_count, external_query_count,
-           external_available_count, external_unavailable_count)
+           external_available_count, external_unavailable_count, auc_value, ks_value, psi_value,
+           precision_rate, recall_rate, false_alarm_rate, stability_status)
         values
           (#{snapshot_date}, #{model_name}, #{rule_count}, #{customer_total}, #{average_risk_score}, #{extreme_risk_count},
            #{high_risk_count}, #{warning_customer_count}, #{forecast_upgrade_count}, #{external_query_count},
-           #{external_available_count}, #{external_unavailable_count})
+           #{external_available_count}, #{external_unavailable_count}, #{auc_value}, #{ks_value}, #{psi_value},
+           #{precision_rate}, #{recall_rate}, #{false_alarm_rate}, #{stability_status})
         on duplicate key update
           rule_count = values(rule_count),
           customer_total = values(customer_total),
@@ -62,8 +66,23 @@
           forecast_upgrade_count = values(forecast_upgrade_count),
           external_query_count = values(external_query_count),
           external_available_count = values(external_available_count),
-          external_unavailable_count = values(external_unavailable_count)
+          external_unavailable_count = values(external_unavailable_count),
+          auc_value = values(auc_value),
+          ks_value = values(ks_value),
+          psi_value = values(psi_value),
+          precision_rate = values(precision_rate),
+          recall_rate = values(recall_rate),
+          false_alarm_rate = values(false_alarm_rate),
+          stability_status = values(stability_status)
     </insert>
+
+    <select id="listModelEffectMetrics" resultType="map">
+        select snapshot_date, model_name, auc_value, ks_value, psi_value, precision_rate,
+               recall_rate, false_alarm_rate, stability_status, created_at
+        from risk_model_monitor_snapshot
+        order by snapshot_date desc, id desc
+        limit #{limit}
+    </select>
 
     <select id="listProductReport" resultType="map">
         select

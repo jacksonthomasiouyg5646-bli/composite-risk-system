@@ -7,6 +7,8 @@ import java.util.Map;
 public interface RiskGovernanceService {
     Map<String, Object> getDataGovernanceOverview();
     Map<String, Object> captureDataQuality();
+    Map<String, Object> simulateDataIngestion(String operator);
+    Map<String, Object> getAuditOverview();
     Map<String, Object> getModelGovernanceOverview();
     Map<String, Object> getModelVersionDetail(Long versionId);
     Map<String, Object> createModelVersion(Map<String, Object> body, String operator);
@@ -20,6 +22,11 @@ public interface RiskGovernanceService {
     Map<String, Object> refreshAlertCases();
     Map<String, Object> startAlertCase(String customerNo, String operator);
     Map<String, Object> closeAlertCase(String customerNo, String comment, String operator);
+    Map<String, Object> submitAlertCaseReview(String customerNo, String comment, String operator);
+    Map<String, Object> approveAlertCaseReview(String customerNo, String comment, String operator);
+    Map<String, Object> rejectAlertCaseReview(String customerNo, String comment, String operator);
+    Map<String, Object> escalateAlertCase(String customerNo, String comment, String operator);
+    Map<String, Object> getAlertCaseTimeline(String customerNo);
     Map<String, Object> batchStartAlertCases(Map<String, Object> body, String operator);
     Map<String, Object> batchCloseAlertCases(Map<String, Object> body, String operator);
     Map<String, Object> runStressTest(Map<String, Object> body, String operator);

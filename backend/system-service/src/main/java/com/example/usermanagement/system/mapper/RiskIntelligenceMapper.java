@@ -20,5 +20,7 @@ public interface RiskIntelligenceMapper {
 
     void upsertModelSnapshot(Map<String, Object> body);
 
+    List<Map<String, Object>> listModelEffectMetrics(@Param("limit") int limit);
+
     List<Map<String, Object>> listProductReport();
 }

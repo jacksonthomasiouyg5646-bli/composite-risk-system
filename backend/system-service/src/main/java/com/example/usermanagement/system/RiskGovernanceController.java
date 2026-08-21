@@ -38,6 +38,16 @@ public class RiskGovernanceController {
         return ApiResponse.ok(riskGovernanceService.captureDataQuality());
     }
 
+    @PostMapping("/data-governance/ingestion/simulate")
+    public ApiResponse<Map<String, Object>> simulateDataIngestion(HttpServletRequest request) {
+        return ApiResponse.ok(riskGovernanceService.simulateDataIngestion(username(request)));
+    }
+
+    @GetMapping("/audit-overview")
+    public ApiResponse<Map<String, Object>> auditOverview() {
+        return ApiResponse.ok(riskGovernanceService.getAuditOverview());
+    }
+
     @GetMapping("/model-governance")
     public ApiResponse<Map<String, Object>> modelGovernance() {
         return ApiResponse.ok(riskGovernanceService.getModelGovernanceOverview());
@@ -112,6 +122,35 @@ public class RiskGovernanceController {
     @PostMapping("/alert-cases/{customerNo}/close")
     public ApiResponse<Map<String, Object>> closeAlertCase(@PathVariable String customerNo, @RequestBody Map<String, Object> body, HttpServletRequest request) {
         return ApiResponse.ok(riskGovernanceService.closeAlertCase(customerNo, text(body, "comment"), username(request)));
+    }
+
+    @RequirePermission("risk:treat")
+    @PostMapping("/alert-cases/{customerNo}/submit-review")
+    public ApiResponse<Map<String, Object>> submitAlertCaseReview(@PathVariable String customerNo, @RequestBody Map<String, Object> body, HttpServletRequest request) {
+        return ApiResponse.ok(riskGovernanceService.submitAlertCaseReview(customerNo, text(body, "comment"), username(request)));
+    }
+
+    @RequirePermission("risk:treat")
+    @PostMapping("/alert-cases/{customerNo}/approve-review")
+    public ApiResponse<Map<String, Object>> approveAlertCaseReview(@PathVariable String customerNo, @RequestBody Map<String, Object> body, HttpServletRequest request) {
+        return ApiResponse.ok(riskGovernanceService.approveAlertCaseReview(customerNo, text(body, "comment"), username(request)));
+    }
+
+    @RequirePermission("risk:treat")
+    @PostMapping("/alert-cases/{customerNo}/reject-review")
+    public ApiResponse<Map<String, Object>> rejectAlertCaseReview(@PathVariable String customerNo, @RequestBody Map<String, Object> body, HttpServletRequest request) {
+        return ApiResponse.ok(riskGovernanceService.rejectAlertCaseReview(customerNo, text(body, "comment"), username(request)));
+    }
+
+    @RequirePermission("risk:treat")
+    @PostMapping("/alert-cases/{customerNo}/escalate")
+    public ApiResponse<Map<String, Object>> escalateAlertCase(@PathVariable String customerNo, @RequestBody(required = false) Map<String, Object> body, HttpServletRequest request) {
+        return ApiResponse.ok(riskGovernanceService.escalateAlertCase(customerNo, text(body, "comment"), username(request)));
+    }
+
+    @GetMapping("/alert-cases/{customerNo}/timeline")
+    public ApiResponse<Map<String, Object>> getAlertCaseTimeline(@PathVariable String customerNo) {
+        return ApiResponse.ok(riskGovernanceService.getAlertCaseTimeline(customerNo));
     }
 
     @RequirePermission("risk:treat")

@@ -69,6 +69,69 @@
         limit 1
     </select>
 
+    <select id="getIngestionSummary" resultType="map">
+        select count(*) as batch_total,
+               ifnull(sum(batch_status = 'SUCCESS'), 0) as success_count,
+               ifnull(sum(batch_status = 'WARNING'), 0) as warning_count,
+               ifnull(sum(batch_status = 'FAILED'), 0) as failed_count,
+               ifnull(sum(source_record_count), 0) as source_record_total,
+               ifnull(sum(accepted_record_count), 0) as accepted_record_total,
+               ifnull(sum(rejected_record_count), 0) as rejected_record_total,
+               max(completed_at) as latest_completed_at
+        from risk_data_ingestion_batch
+    </select>
+
+    <select id="listIngestionBatches" resultType="map">
+        select batch_no, source_system, source_entity, batch_status, source_record_count,
+               accepted_record_count, rejected_record_count, quality_score, started_at, completed_at, operator, remark
+        from risk_data_ingestion_batch
+        order by started_at desc, id desc
+        limit #{limit}
+    </select>
+
+    <insert id="insertIngestionBatch" parameterType="map">
+        insert into risk_data_ingestion_batch
+          (batch_no, source_system, source_entity, batch_status, source_record_count, accepted_record_count,
+           rejected_record_count, quality_score, started_at, completed_at, operator, remark)
+        values
+          (#{batch_no}, #{source_system}, #{source_entity}, #{batch_status}, #{source_record_count}, #{accepted_record_count},
+           #{rejected_record_count}, #{quality_score}, #{started_at}, #{completed_at}, #{operator}, #{remark})
+    </insert>
+
+    <select id="getPermissionAuditSummary" resultType="map">
+        select
+            (select count(*) from sys_role where status = 'ENABLED') as active_role_count,
+            (select count(*) from sys_permission) as permission_count,
+            (select count(*) from sys_role_permission) as role_permission_count,
+            (select count(*) from sys_user where status = 'ENABLED') as active_user_count,
+            (select count(*) from sys_operation_log where method in ('POST','PUT','DELETE') and created_at >= date_sub(now(), interval 7 day)) as sensitive_operation_7d,
+            (select count(*) from sys_operation_log where status = 'FAILED' and created_at >= date_sub(now(), interval 7 day)) as failed_operation_7d
+    </select>
+
+    <select id="listRolePermissionMatrix" resultType="map">
+        select r.name as role_name, r.code as role_code, count(p.id) as permission_count,
+               group_concat(p.code order by p.module, p.code separator ', ') as permission_codes
+        from sys_role r
+        left join sys_role_permission rp on rp.role_id = r.id
+        left join sys_permission p on p.id = rp.permission_id
+        where r.status = 'ENABLED'
+        group by r.id, r.name, r.code
+        order by permission_count desc, r.id
+    </select>
+
+    <select id="listSensitiveOperationLogs" resultType="map">
+        select username, module, action, method, request_uri, status, created_at
+        from sys_operation_log
+        where method in ('POST','PUT','DELETE')
+           or request_uri like '%/approve%'
+           or request_uri like '%/publish%'
+           or request_uri like '%/rollback%'
+           or request_uri like '%/close%'
+           or request_uri like '%/escalate%'
+        order by id desc
+        limit #{limit}
+    </select>
+
     <insert id="upsertDataQualitySnapshot" parameterType="map">
         insert into risk_data_quality_snapshot
           (snapshot_date, quality_score, check_total, pass_count, warning_count, failed_count, issue_total, detail_json, captured_at)
@@ -199,7 +262,8 @@
 
     <select id="listAlertCases" resultType="map">
         select c.id, c.customer_no, c.risk_code, c.priority, c.risk_score, c.alert_state, c.owner, c.sla_due_at,
-               c.escalation_level, c.first_detected_at, c.last_detected_at, c.started_at, c.closed_at, c.closure_comment, c.updated_at,
+               c.escalation_level, c.review_comment, c.reviewed_by, c.reviewed_at, c.first_detected_at, c.last_detected_at,
+               c.started_at, c.closed_at, c.closure_comment, c.updated_at,
                u.customer_name, u.industry_name, u.owner_org_name,
                l.id as link_id, l.last_sync_state, l.last_sync_at,
                p.id as treatment_plan_id, p.plan_code, p.status as treatment_status, p.progress as treatment_progress, p.due_date as treatment_due_date,
@@ -223,7 +287,7 @@
 
     <select id="getAlertCase" resultType="map">
         select c.id, c.customer_no, c.risk_code, c.priority, c.risk_score, c.alert_state, c.owner, c.sla_due_at, c.escalation_level,
-               c.first_detected_at, c.last_detected_at, c.started_at, c.closed_at, c.closure_comment, c.updated_at,
+               c.review_comment, c.reviewed_by, c.reviewed_at, c.first_detected_at, c.last_detected_at, c.started_at, c.closed_at, c.closure_comment, c.updated_at,
                u.customer_name, u.industry_name, u.owner_org_name
         from risk_alert_case c
         left join corporate_customer u on u.customer_no = c.customer_no
@@ -234,6 +298,8 @@
         select count(*) as total_count,
                ifnull(sum(alert_state = 'OPEN'), 0) as open_count,
                ifnull(sum(alert_state = 'IN_PROGRESS'), 0) as in_progress_count,
+               ifnull(sum(alert_state = 'PENDING_REVIEW'), 0) as pending_review_count,
+               ifnull(sum(alert_state = 'REJECTED'), 0) as rejected_count,
                ifnull(sum(alert_state = 'OVERDUE'), 0) as overdue_count,
                ifnull(sum(alert_state = 'RESOLVED'), 0) as resolved_count,
                ifnull(sum(alert_state in ('OPEN', 'IN_PROGRESS', 'OVERDUE') and date(sla_due_at) = current_date), 0) as due_today_count,
@@ -262,14 +328,53 @@
     <update id="startAlertCase">
         update risk_alert_case
         set alert_state = 'IN_PROGRESS', owner = coalesce(nullif(#{operator}, ''), owner), started_at = coalesce(started_at, #{startedAt})
-        where customer_no = #{customerNo} and alert_state in ('OPEN', 'OVERDUE')
+        where customer_no = #{customerNo} and alert_state in ('OPEN', 'OVERDUE', 'REJECTED')
     </update>
 
     <update id="closeAlertCase">
         update risk_alert_case
         set alert_state = 'RESOLVED', closure_comment = #{comment}, closed_at = #{closedAt}
-        where customer_no = #{customerNo} and alert_state in ('OPEN', 'IN_PROGRESS', 'OVERDUE')
+        where customer_no = #{customerNo} and alert_state in ('OPEN', 'IN_PROGRESS', 'OVERDUE', 'PENDING_REVIEW', 'REJECTED')
     </update>
+
+    <update id="updateAlertCaseWorkflow">
+        update risk_alert_case
+        set alert_state = #{state},
+            owner = coalesce(nullif(owner, ''), #{operator}),
+            review_comment = #{comment},
+            reviewed_by = case when #{state} in ('RESOLVED', 'REJECTED') then #{operator} else reviewed_by end,
+            reviewed_at = case when #{state} in ('RESOLVED', 'REJECTED') then #{operatedAt} else reviewed_at end,
+            closed_at = case when #{state} = 'RESOLVED' then #{operatedAt} else closed_at end,
+            closure_comment = case when #{state} = 'RESOLVED' then #{comment} else closure_comment end
+        where customer_no = #{customerNo}
+          and (
+              (#{state} = 'PENDING_REVIEW' and alert_state in ('IN_PROGRESS', 'OVERDUE', 'REJECTED'))
+              or (#{state} = 'RESOLVED' and alert_state = 'PENDING_REVIEW')
+              or (#{state} = 'REJECTED' and alert_state = 'PENDING_REVIEW')
+          )
+    </update>
+
+    <update id="escalateAlertCase">
+        update risk_alert_case
+        set alert_state = 'OVERDUE',
+            escalation_level = least(escalation_level + 1, 3),
+            review_comment = #{comment},
+            owner = coalesce(nullif(owner, ''), #{operator})
+        where customer_no = #{customerNo} and alert_state in ('OPEN', 'IN_PROGRESS', 'PENDING_REVIEW', 'REJECTED', 'OVERDUE')
+    </update>
+
+    <insert id="insertAlertCaseTimeline" parameterType="map">
+        insert into risk_alert_case_timeline(customer_no, action_type, from_state, to_state, operator, comment, created_at)
+        values (#{customer_no}, #{action_type}, #{from_state}, #{to_state}, #{operator}, #{comment}, #{created_at})
+    </insert>
+
+    <select id="listAlertCaseTimeline" resultType="map">
+        select customer_no, action_type, from_state, to_state, operator, comment, created_at
+        from risk_alert_case_timeline
+        where customer_no = #{customerNo}
+        order by id desc
+        limit 50
+    </select>
 
     <update id="escalateOverdueAlertCases">
         update risk_alert_case
